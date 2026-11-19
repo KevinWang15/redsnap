@@ -44,7 +44,9 @@ about 1.25× scale, so measurements from it are divided by 1.25.
   empty.
 - To the right of the field, 12 apart: the RedSnap mark, 44 × 44 with no frame
   or background (changed 2026-11-19): four white corner brackets (13 px, 2.5 px
-  stroke, 4 px from the edges) around an 18 px red rounded square.
+  stroke, 4 px from the edges) around an 18 px red rounded square, drawn as two
+  SVG layers over the same box so they stay centered on each other at any
+  display scale.
 - Icons are [Lucide](https://lucide.dev) (ISC), compiled into the binary
   (`crates/app/assets/icons`) and tinted with the text color; the settings app
   uses the same set through `lucide-react`.

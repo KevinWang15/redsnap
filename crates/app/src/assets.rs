@@ -17,6 +17,8 @@ pub mod icon {
     pub const FOLDER: &str = "icons/folder.svg";
     pub const IMAGE: &str = "icons/image.svg";
     pub const INFO: &str = "icons/info.svg";
+    pub const MARK_BRACKETS: &str = "icons/mark-brackets.svg";
+    pub const MARK_SQUARE: &str = "icons/mark-square.svg";
     pub const PIN: &str = "icons/pin.svg";
     pub const POWER: &str = "icons/power.svg";
     pub const REFRESH_CW: &str = "icons/refresh-cw.svg";
@@ -38,6 +40,8 @@ const FILES: &[(&str, &[u8])] = &[
     ("icons/folder.svg", include_bytes!("../assets/icons/folder.svg")),
     ("icons/image.svg", include_bytes!("../assets/icons/image.svg")),
     ("icons/info.svg", include_bytes!("../assets/icons/info.svg")),
+    ("icons/mark-brackets.svg", include_bytes!("../assets/icons/mark-brackets.svg")),
+    ("icons/mark-square.svg", include_bytes!("../assets/icons/mark-square.svg")),
     ("icons/pin.svg", include_bytes!("../assets/icons/pin.svg")),
     ("icons/power.svg", include_bytes!("../assets/icons/power.svg")),
     ("icons/refresh-cw.svg", include_bytes!("../assets/icons/refresh-cw.svg")),

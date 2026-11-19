@@ -370,31 +370,18 @@ pub(super) fn key_hint(cap: Cap, label: &'static str) -> impl IntoElement {
         .child(div().text_color(white(0.60)).child(label))
 }
 
-/// The RedSnap mark, filling its 44 px square: four corner brackets around a
-/// red rounded square. No frame or background.
+/// The RedSnap mark, filling its 44 px square: corner brackets around a red
+/// rounded square, no frame. Drawn as two SVG layers over the same box, so
+/// they're centered on each other at any display scale (separate boxes
+/// rounded apart at 125%, leaving the square a pixel or two high).
 fn logo_button() -> impl IntoElement {
-    let bracket = |top: bool, left: bool| {
-        let d = div().absolute().size(px(13.)).border_color(white(0.9));
-        let d = if top { d.top(px(4.)).border_t(px(2.5)) } else { d.bottom(px(4.)).border_b(px(2.5)) };
-        let d = if left { d.left(px(4.)).border_l(px(2.5)) } else { d.right(px(4.)).border_r(px(2.5)) };
-        let r = px(3.);
-        match (top, left) {
-            (true, true) => d.rounded_tl(r),
-            (true, false) => d.rounded_tr(r),
-            (false, true) => d.rounded_bl(r),
-            (false, false) => d.rounded_br(r),
-        }
+    let layer = |path: &'static str, color: Hsla| {
+        gpui::svg().path(path).absolute().top_0().left_0().size_full().text_color(color)
     };
     div()
         .relative()
         .size(px(44.))
         .flex_none()
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(bracket(true, true))
-        .child(bracket(true, false))
-        .child(bracket(false, true))
-        .child(bracket(false, false))
-        .child(div().size(px(18.)).rounded(px(4.)).bg(rgb(RED)))
+        .child(layer(crate::assets::icon::MARK_BRACKETS, white(0.9)))
+        .child(layer(crate::assets::icon::MARK_SQUARE, rgb(RED).into()))
 }
