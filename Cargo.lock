@@ -5619,6 +5619,7 @@ dependencies = [
  "arc-swap",
  "chrono",
  "dirs 6.0.0",
+ "embed-resource",
  "env_logger",
  "futures",
  "global-hotkey",
@@ -5681,6 +5682,7 @@ name = "redsnap-settings"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "embed-resource",
  "interprocess",
  "redsnap-platform",
  "serde_json",

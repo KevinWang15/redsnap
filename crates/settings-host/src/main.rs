@@ -244,6 +244,7 @@ fn run() -> Result<()> {
         .with_title("RedSnap Settings")
         .with_inner_size(tao::dpi::LogicalSize::new(980.0, 700.0))
         .with_min_inner_size(tao::dpi::LogicalSize::new(780.0, 540.0))
+        .with_window_icon(tao::window::Icon::from_rgba(redsnap_platform::icon::app_icon_rgba(64), 64, 64).ok())
         // Shown once the page has loaded, so it never flashes empty.
         .with_visible(false)
         .build(&event_loop)?;
@@ -297,7 +298,12 @@ fn run() -> Result<()> {
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
-            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => *control_flow = ControlFlow::Exit,
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                // Hide first: tearing the webview down uncovers the window's
+                // own white background for a moment.
+                window.set_visible(false);
+                *control_flow = ControlFlow::Exit;
+            }
             Event::UserEvent(Ui::Loaded) if !shown => {
                 shown = true;
                 window.set_visible(true);
@@ -314,7 +320,10 @@ fn run() -> Result<()> {
                 }
                 let _ = webview.evaluate_script(&format!("window.__redsnapReceive({msg})"));
             }
-            Event::UserEvent(Ui::Closed) => *control_flow = ControlFlow::Exit,
+            Event::UserEvent(Ui::Closed) => {
+                window.set_visible(false);
+                *control_flow = ControlFlow::Exit;
+            }
             _ => {}
         }
     });

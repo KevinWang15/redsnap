@@ -59,7 +59,10 @@ mod imp {
                 }
             }));
             let size = 32;
-            let icon = Icon::from_rgba(crate::icon::logo_rgba(size), size, size)?;
+            // The app icon (mark on a dark tile): the bare white brackets vanish
+            // on a light taskbar. macOS menu bars use the bare mark.
+            let rgba = if cfg!(target_os = "macos") { crate::icon::logo_rgba(size) } else { crate::icon::app_icon_rgba(size) };
+            let icon = Icon::from_rgba(rgba, size, size)?;
             let builder = TrayIconBuilder::new()
                 .with_menu(Box::new(menu))
                 .with_menu_on_left_click(cfg!(target_os = "macos"))
@@ -97,7 +100,7 @@ mod imp {
         fn icon_pixmap(&self) -> Vec<ksni::Icon> {
             let size = 32;
             // ARGB32, network byte order.
-            let data = crate::icon::logo_rgba(size).as_chunks::<4>().0.iter().flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
+            let data = crate::icon::app_icon_rgba(size).as_chunks::<4>().0.iter().flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
             vec![ksni::Icon { width: size as i32, height: size as i32, data }]
         }
 
