@@ -72,6 +72,10 @@ pub fn bind_keys(cx: &mut gpui::App) {
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
     pub rows: usize,
+    /// The panel's corner radius (the window's, when the OS rounds it).
+    pub radius: f32,
+    /// Opacity of the panel's fill; below 1 the OS backdrop shows through.
+    pub fill: f32,
 }
 
 /// The action panel (Tab): what can be done with the selected result.

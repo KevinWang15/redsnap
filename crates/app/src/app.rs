@@ -120,6 +120,44 @@ fn engine(config: &Config, catalog: Arc<ArcSwap<AppCatalog>>) -> (Engine, Arc<Fi
     (Engine::new(providers, keywords), files)
 }
 
+/// The panel's look. Being tried (2026-11-19): Windows 11's acrylic, blurred
+/// live by DWM, behind a translucent fill. Until a variant is picked, each
+/// run takes it from the environment:
+/// - `REDSNAP_BACKDROP`: `acrylic` (default on Windows) or `none`;
+/// - `REDSNAP_CORNERS`: `dwm` (Windows rounds the window, 8 px, smooth;
+///   default) or `region` (a 20 px window region, aliased);
+/// - `REDSNAP_FILL`: the fill's opacity, 0 to 1 (default 0.6; 0.97 without
+///   a backdrop).
+#[derive(Clone, Copy, Debug)]
+struct Glass {
+    backdrop: os::Backdrop,
+    clip: os::Clip,
+    radius: f32,
+    fill: f32,
+}
+
+impl Glass {
+    fn from_env() -> Self {
+        let var = |k: &str| std::env::var(k).ok().map(|v| v.trim().to_ascii_lowercase());
+        let acrylic = cfg!(windows) && var("REDSNAP_BACKDROP").as_deref() != Some("none");
+        if !acrylic {
+            // The panel draws its own 20 px corners on a transparent window.
+            let fill = var("REDSNAP_FILL").and_then(|v| v.parse().ok()).unwrap_or(0.97f32).clamp(0., 1.);
+            return Glass { backdrop: os::Backdrop::None, clip: os::Clip::None, radius: 20., fill };
+        }
+        // The acrylic fills the window's rectangle, so the window itself
+        // must have the panel's shape.
+        let (clip, radius) = match var("REDSNAP_CORNERS").as_deref() {
+            Some("region") => (os::Clip::Region, 20.),
+            _ => (os::Clip::Dwm, 8.),
+        };
+        let fill = var("REDSNAP_FILL").and_then(|v| v.parse().ok()).unwrap_or(0.6f32).clamp(0., 1.);
+        let glass = Glass { backdrop: os::Backdrop::Acrylic, clip, radius, fill };
+        log::info!("look: {glass:?}");
+        glass
+    }
+}
+
 /// Asks for a rescan of installed apps.
 pub fn reload_apps(cx: &mut App) {
     let _ = cx.global::<Events>().0.unbounded_send(Event::Rescan);
@@ -176,7 +214,8 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
         launcher::bind_keys(cx);
 
         let rows = config.rows as usize;
-        let lopts = launcher::Options { rows };
+        let glass = Glass::from_env();
+        let lopts = launcher::Options { rows, radius: glass.radius, fill: glass.fill };
         let bounds = Bounds { origin: point(px(0.), px(0.)), size: size(px(launcher::WIDTH), px(launcher::height(rows))) };
         let window_engine = engine(&config, catalog.clone());
         let file_events = events.clone();
@@ -275,8 +314,7 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
             // First, outside any update: style the window and make sure it's
             // hidden. Events (the first show included) are handled after.
             if let Some(n) = native {
-                // No Windows rounding or border: the panel draws its own 20 px corners.
-                os::setup(n, os::Clip::None, 20.);
+                os::setup(n, glass.clip, glass.radius, glass.backdrop);
                 os::hide(n);
             }
             while let Some(event) = rx.next().await {

@@ -36,12 +36,14 @@ mod windows {
     use super::{Native, Placement};
     use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
     use windows_sys::Win32::Graphics::Dwm::{
-        DWMWA_BORDER_COLOR, DWMWA_CLOAK, DWMWA_COLOR_NONE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND,
+        DWMSBT_TRANSIENTWINDOW, DWMWA_BORDER_COLOR, DWMWA_CLOAK, DWMWA_COLOR_NONE, DWMWA_SYSTEMBACKDROP_TYPE,
+        DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DwmExtendFrameIntoClientArea, DWMWCP_DONOTROUND, DWMWCP_ROUND,
         DwmSetWindowAttribute,
     };
     use windows_sys::Win32::Graphics::Gdi::{
         CreateRoundRectRgn, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, SetWindowRgn,
     };
+    use windows_sys::Win32::UI::Controls::MARGINS;
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetCursorPos, GetWindowRect, HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOSIZE,
@@ -69,9 +71,26 @@ mod windows {
     /// Windows 11's corner radius for rounded windows, in logical pixels.
     pub const DWM_RADIUS: f32 = 8.0;
 
-    pub fn setup(n: Native, clip: Clip, panel_radius: f32) {
+    /// What the compositor draws behind the window's transparent parts.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum Backdrop {
+        None,
+        /// Windows 11's acrylic (`DWMSBT_TRANSIENTWINDOW`): what's behind,
+        /// blurred live by DWM. 22H2 or later; older versions ignore it.
+        Acrylic,
+    }
+
+    pub fn setup(n: Native, clip: Clip, panel_radius: f32, backdrop: Backdrop) {
         let h = hwnd(n);
         unsafe {
+            if backdrop == Backdrop::Acrylic {
+                // The backdrop shows through the frame, so the frame covers
+                // the whole window; gpui's transparent pixels let it through.
+                let all = MARGINS { cxLeftWidth: -1, cxRightWidth: -1, cyTopHeight: -1, cyBottomHeight: -1 };
+                DwmExtendFrameIntoClientArea(h, &all);
+                let kind: i32 = DWMSBT_TRANSIENTWINDOW;
+                DwmSetWindowAttribute(h, DWMWA_SYSTEMBACKDROP_TYPE as u32, (&kind as *const i32).cast(), 4);
+            }
             let dark: i32 = 1;
             DwmSetWindowAttribute(h, DWMWA_USE_IMMERSIVE_DARK_MODE as u32, (&dark as *const i32).cast(), 4);
             let corner = if clip == Clip::Dwm { DWMWCP_ROUND } else { DWMWCP_DONOTROUND };
@@ -173,7 +192,13 @@ mod linux {
         CONN.get_or_init(|| x11rb::connect(None).map_err(|e| log::warn!("x11 connect: {e}")).ok()).as_ref()
     }
 
-    pub fn setup(_: Native, _: Clip, _: f32) {}
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum Backdrop {
+        None,
+        Acrylic,
+    }
+
+    pub fn setup(_: Native, _: Clip, _: f32, _: Backdrop) {}
 
     pub fn placement_at_cursor(_: Native, size: (f32, f32)) -> Placement {
         let Some((c, screen)) = conn() else { return Placement { x: 0, y: 0 } };
@@ -246,7 +271,13 @@ mod macos {
         None,
     }
 
-    pub fn setup(_: Native, _: Clip, _: f32) {}
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum Backdrop {
+        None,
+        Acrylic,
+    }
+
+    pub fn setup(_: Native, _: Clip, _: f32, _: Backdrop) {}
     pub fn placement_at_cursor(_: Native, _: (f32, f32)) -> Placement {
         Placement { x: 0, y: 0 }
     }

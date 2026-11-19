@@ -16,7 +16,6 @@ fn white(alpha: f32) -> Hsla {
 }
 
 const RED: u32 = 0xE8344E;
-const RADIUS: f32 = 20.;
 
 fn with_alpha(rgb: u32, alpha: f32) -> gpui::Rgba {
     rgba((rgb << 8) | (alpha.clamp(0., 1.) * 255.).round() as u32)
@@ -37,10 +36,8 @@ impl Render for Launcher {
         let count = self.hits.len();
         let list: Vec<AnyElement> =
             (self.top..(self.top + rows).min(count)).map(|i| self.row(i, i == self.selected, i - self.top, cx)).collect();
-        // The panel's fill: nearly opaque, so only a hint of what's behind
-        // the window shows, live.
-        let alpha = 0.97;
-        let radius = px(RADIUS);
+        let alpha = self.opts.fill;
+        let radius = px(self.opts.radius);
         let layer = || div().absolute().top_0().left_0().size_full().rounded(radius);
 
         let search_row = div()
