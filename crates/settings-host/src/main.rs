@@ -54,8 +54,10 @@ fn start_url() -> &'static str {
 enum Ui {
     /// A message from RedSnap (a response or an event), for the page.
     FromRedSnap(Value),
-    /// The page has loaded: show the window.
+    /// The page has loaded.
     Loaded,
+    /// The page has painted (or a second has passed since it loaded).
+    Painted,
     /// The channel closed: RedSnap is gone.
     Closed,
 }
@@ -96,6 +98,10 @@ fn bridge_script() -> String {
     onEvent: (cb) => {{ listeners.add(cb); return () => listeners.delete(cb); }},
     platform: {platform:?},
   }});
+  // Tell the host once the page has painted (two frames after load), so it
+  // shows the window with content instead of an empty one.
+  window.addEventListener('load', () => requestAnimationFrame(() => requestAnimationFrame(() =>
+    window.ipc.postMessage(JSON.stringify({{ painted: true }})))));
 }})();"#,
         platform = platform()
     )
@@ -221,6 +227,32 @@ fn serve(root: &Path, path: &str) -> Response<Vec<u8>> {
     Response::builder().header(CONTENT_TYPE, mime).body(bytes).unwrap()
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    Hidden,
+    /// Windows: shown but cloaked, waiting for the page to paint.
+    Cloaked,
+    Shown,
+}
+
+fn reveal(window: &tao::window::Window, channel: &Channel) {
+    window.set_visible(true);
+    window.set_focus();
+    // For RedSnap's log: requested → shown.
+    let _ = channel.send("settings.shown", json!({}), None);
+}
+
+#[cfg(windows)]
+fn cloak(window: &tao::window::Window, on: bool) {
+    use tao::platform::windows::WindowExtWindows;
+    use windows_sys::Win32::Graphics::Dwm::{DWMWA_CLOAK, DwmSetWindowAttribute};
+    let value: i32 = on as i32;
+    unsafe { DwmSetWindowAttribute(window.hwnd() as _, DWMWA_CLOAK as u32, (&value as *const i32).cast(), 4) };
+}
+
+#[cfg(not(windows))]
+fn cloak(_: &tao::window::Window, _: bool) {}
+
 fn main() {
     if let Err(e) = run() {
         // No console in release builds on Windows: say it in a log and a dialog.
@@ -245,8 +277,10 @@ fn run() -> Result<()> {
         .with_inner_size(tao::dpi::LogicalSize::new(980.0, 700.0))
         .with_min_inner_size(tao::dpi::LogicalSize::new(780.0, 540.0))
         .with_window_icon(tao::window::Icon::from_rgba(redsnap_platform::icon::app_icon_rgba(64), 64, 64).ok())
-        // Shown once the page has loaded, so it never flashes empty.
+        // Shown once the page has painted, on the app's own background, so it
+        // never flashes white (the default window background).
         .with_visible(false)
+        .with_background_color((13, 16, 23, 255))
         .build(&event_loop)?;
 
     let root = web_root();
@@ -270,10 +304,20 @@ fn run() -> Result<()> {
         .with_on_page_load_handler(move |event, _url| {
             if let PageLoadEvent::Finished = event {
                 let _ = page_proxy.send_event(Ui::Loaded);
+                // A fallback in case the page never reports painting.
+                let proxy = page_proxy.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    let _ = proxy.send_event(Ui::Painted);
+                });
             }
         })
         .with_ipc_handler(move |request| {
             let Ok(msg) = serde_json::from_str::<Value>(request.body()) else { return };
+            if msg["painted"] == true {
+                let _ = proxy.send_event(Ui::Painted);
+                return;
+            }
             let (id, method) = (msg["id"].clone(), msg["method"].as_str().unwrap_or("").to_string());
             if !ALLOWED.contains(&method.as_str()) {
                 let _ = proxy.send_event(Ui::FromRedSnap(json!({ "id": id, "error": format!("not allowed: {method}") })));
@@ -294,7 +338,10 @@ fn run() -> Result<()> {
         builder.build_gtk(window.default_vbox().context("no GTK box for the webview")?)?
     };
 
-    let mut shown = false;
+    // Windows: a hidden window doesn't render, so it's shown cloaked (DWM
+    // doesn't display it, but the webview paints) and uncloaked once the page
+    // has painted. Elsewhere it's shown when the page has loaded.
+    let mut stage = Stage::Hidden;
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
@@ -304,14 +351,22 @@ fn run() -> Result<()> {
                 window.set_visible(false);
                 *control_flow = ControlFlow::Exit;
             }
-            Event::UserEvent(Ui::Loaded) if !shown => {
-                shown = true;
-                window.set_visible(true);
-                window.set_focus();
-                // For RedSnap's log: requested → shown.
-                let _ = channel.send("settings.shown", json!({}), None);
+            Event::UserEvent(Ui::Loaded) if stage == Stage::Hidden => {
+                if cfg!(windows) {
+                    cloak(&window, true);
+                    window.set_visible(true);
+                    stage = Stage::Cloaked;
+                } else {
+                    reveal(&window, &channel);
+                    stage = Stage::Shown;
+                }
             }
-            Event::UserEvent(Ui::Loaded) => {}
+            Event::UserEvent(Ui::Painted) if stage == Stage::Cloaked => {
+                cloak(&window, false);
+                reveal(&window, &channel);
+                stage = Stage::Shown;
+            }
+            Event::UserEvent(Ui::Loaded | Ui::Painted) => {}
             Event::UserEvent(Ui::FromRedSnap(msg)) => {
                 if msg["event"] == "focus" {
                     window.set_visible(true);
