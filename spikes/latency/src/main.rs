@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! redsnap-spike [--paint=stock|now] [--glass=blur|transparent|opaque]
-//!               [--clip=dwm|region|none] [--hotkey=Alt+Shift+Space]
+//!               [--clip=dwm|region|none] [--hotkey=Ctrl+Alt+R]
 //!               [--bench[=SHOWS]] [--onscreen] [--perf=perf.jsonl]
 //! ```
 //!
@@ -49,7 +49,7 @@ fn parse_args() -> Args {
         paint: PaintMode::Now,
         glass: WindowBackgroundAppearance::Blurred,
         clip: os::Clip::Dwm,
-        hotkey: "Alt+Shift+Space".into(),
+        hotkey: "Ctrl+Alt+R".into(),
         bench: None,
         onscreen: false,
         perf: PathBuf::from("perf.jsonl"),
