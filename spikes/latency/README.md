@@ -50,6 +50,21 @@ CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc \
 | gpui layout + paint + present | 0.63 ms | 5.84 ms | 9.75 ms |
 | window creation (once, at startup) | 15.5 ms | | |
 
+**Windows 11, by hand** (visible window, real keyboard, Microsoft Pinyin IME),
+`--paint=stock`: 3 shows, 68 measured keystrokes. Chinese IME works, and it
+felt instant.
+
+| metric | p50 | p95 | max |
+|---|---|---|---|
+| hotkey → frame presented | 1.58 ms | 1.67 ms | |
+| keystroke → frame with its results | 6.29 ms | 9.78 ms | 279.9 ms (one unexplained outlier) |
+| gpui layout + paint + present | 0.61 ms | 1.35 ms | 5.63 ms |
+
+So stock painting already meets the keystroke target on a visible window: on
+average it waits half a refresh. Painting right away (bench above) removes that
+wait and leaves more headroom. Before release, find the cause of the 280 ms
+outlier (a first-time CJK font fallback load is the first suspect).
+
 **Linux**, Xvfb with software Vulkan, `--bench=20`. Painting right away isn't
 wired up on X11 yet, so this is stock painting:
 
