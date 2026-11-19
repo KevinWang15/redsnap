@@ -40,18 +40,34 @@ fn engine() -> Engine {
         app("music", "网易云音乐"),
         app("terminal", "Terminal"),
     ];
-    let catalog = Arc::new(ArcSwap::from_pointee(AppCatalog::build(apps, &BTreeMap::new(), &[])));
+    let catalog = Arc::new(ArcSwap::from_pointee(AppCatalog::build(
+        apps,
+        &BTreeMap::new(),
+        &[],
+    )));
     let config = Config::default();
     let keywords = Keywords::new(
-        config.web_searches.iter().map(|w| (w.keyword.clone(), Target::WebSearch(w.id.clone()))),
+        config
+            .web_searches
+            .iter()
+            .map(|w| (w.keyword.clone(), Target::WebSearch(w.id.clone()))),
     );
     Engine::new(
         vec![
             Box::new(CalculatorProvider),
             Box::new(OpenProvider),
-            Box::new(FilesProvider(Arc::new(Files::new(true, true, "Index", "", Some("/home/me".into()))))),
+            Box::new(FilesProvider(Arc::new(Files::new(
+                true,
+                true,
+                "Index",
+                "",
+                Some("/home/me".into()),
+            )))),
             Box::new(AppsProvider::new(catalog)),
-            Box::new(CommandsProvider::new(&[SystemCommand::Lock, SystemCommand::Restart])),
+            Box::new(CommandsProvider::new(&[
+                SystemCommand::Lock,
+                SystemCommand::Restart,
+            ])),
             Box::new(QuickLinksProvider::new(Vec::new())),
             Box::new(WebSearchProvider::new(config.web_searches)),
         ],
@@ -98,9 +114,15 @@ fn calculator_urls_and_paths_go_on_top() {
     assert_eq!(hits[0].item.title, "0.5");
     assert_eq!(hits[0].item.primary, Action::CopyText("0.5".into()));
     let hits = search(&mut e, "github.com", &u);
-    assert_eq!(hits[0].item.primary, Action::OpenUrl("https://github.com".into()));
+    assert_eq!(
+        hits[0].item.primary,
+        Action::OpenUrl("https://github.com".into())
+    );
     let hits = search(&mut e, "~/dev", &u);
-    assert_eq!(hits[0].item.primary, Action::OpenPath("/home/me/dev".into()));
+    assert_eq!(
+        hits[0].item.primary,
+        Action::OpenPath("/home/me/dev".into())
+    );
 }
 
 #[test]
@@ -109,7 +131,10 @@ fn keyword_routes_to_a_web_search() {
     let u = Arc::new(Usage::default());
     let hits = search(&mut e, "g rust gpui", &u);
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].item.primary, Action::OpenUrl("https://www.google.com/search?q=rust+gpui".into()));
+    assert_eq!(
+        hits[0].item.primary,
+        Action::OpenUrl("https://www.google.com/search?q=rust+gpui".into())
+    );
 }
 
 #[test]
@@ -118,7 +143,11 @@ fn web_fallback_only_when_nothing_matches() {
     let u = Arc::new(Usage::default());
     let hits = search(&mut e, "zqxv kplm", &u);
     assert_eq!(titles(&hits), ["Search Google for “zqxv kplm”"]);
-    assert!(!titles(&search(&mut e, "saf", &u)).iter().any(|t| t.starts_with("Search Google for")));
+    assert!(
+        !titles(&search(&mut e, "saf", &u))
+            .iter()
+            .any(|t| t.starts_with("Search Google for"))
+    );
 }
 
 #[test]
@@ -127,14 +156,23 @@ fn picks_reorder_results_for_that_query() {
     let store = UsageStore::open(&dir.path().join("usage.db")).unwrap();
     let mut e = engine();
     let before = search(&mut e, "c", &store.snapshot());
-    let chrome = before.iter().find(|h| h.item.title == "Google Chrome").expect("chrome matches c").item.id.clone();
+    let chrome = before
+        .iter()
+        .find(|h| h.item.title == "Google Chrome")
+        .expect("chrome matches c")
+        .item
+        .id
+        .clone();
     assert_ne!(before[0].item.id, chrome);
     store.record_pick("c", &chrome, NOW);
     store.flush();
     let after = search(&mut e, "c", &store.snapshot());
     assert_eq!(after[0].item.title, "Google Chrome");
     // Learning stays within the match class: a literal "calendar" beats it.
-    assert_eq!(search(&mut e, "calendar", &store.snapshot())[0].item.title, "Calendar");
+    assert_eq!(
+        search(&mut e, "calendar", &store.snapshot())[0].item.title,
+        "Calendar"
+    );
 }
 
 #[test]
@@ -142,10 +180,16 @@ fn empty_query_lists_most_used_first() {
     let dir = tempfile::tempdir().unwrap();
     let store = UsageStore::open(&dir.path().join("usage.db")).unwrap();
     let mut e = engine();
-    let terminal = search(&mut e, "terminal", &store.snapshot())[0].item.id.clone();
+    let terminal = search(&mut e, "terminal", &store.snapshot())[0]
+        .item
+        .id
+        .clone();
     store.record_pick("terminal", &terminal, NOW);
     store.flush();
-    assert_eq!(search(&mut e, "", &store.snapshot())[0].item.title, "Terminal");
+    assert_eq!(
+        search(&mut e, "", &store.snapshot())[0].item.title,
+        "Terminal"
+    );
 }
 
 #[test]
@@ -153,18 +197,42 @@ fn sn_lists_every_snippet_and_nothing_else() {
     use redsnap_core::config::Snippet;
     use redsnap_core::providers::SnippetsProvider;
     let snippets: Vec<Snippet> = (0..80)
-        .map(|i| Snippet { id: format!("s{i}"), name: format!("Snippet {i}"), trigger: format!(";s{i}x"), text: "t".into(), auto_expand: true })
+        .map(|i| Snippet {
+            id: format!("s{i}"),
+            name: format!("Snippet {i}"),
+            trigger: format!(";s{i}x"),
+            text: "t".into(),
+            auto_expand: true,
+        })
         .collect();
     let keywords = Keywords::new([("sn".to_string(), Target::Snippets)]);
     let apps = vec![app("snap", "Snap Camera")];
-    let catalog = Arc::new(ArcSwap::from_pointee(AppCatalog::build(apps, &BTreeMap::new(), &[])));
-    let mut e = Engine::new(vec![Box::new(AppsProvider::new(catalog)), Box::new(SnippetsProvider::new(&snippets))], keywords);
+    let catalog = Arc::new(ArcSwap::from_pointee(AppCatalog::build(
+        apps,
+        &BTreeMap::new(),
+        &[],
+    )));
+    let mut e = Engine::new(
+        vec![
+            Box::new(AppsProvider::new(catalog)),
+            Box::new(SnippetsProvider::new(&snippets)),
+        ],
+        keywords,
+    );
     let u = Arc::new(Usage::default());
     let all = e.search("sn ", &u, NOW, 200).1;
     assert_eq!(all.len(), 80);
-    assert!(all.iter().all(|h| h.item.id.as_str().starts_with("snippet:")));
+    assert!(
+        all.iter()
+            .all(|h| h.item.id.as_str().starts_with("snippet:"))
+    );
     let some = e.search("sn snippet 7", &u, NOW, 200).1;
     assert!(some.iter().any(|h| h.item.title == "Snippet 7"));
     // Without the space, "sn" is an ordinary query: the app is found too.
-    assert!(e.search("sn", &u, NOW, 200).1.iter().any(|h| h.item.title == "Snap Camera"));
+    assert!(
+        e.search("sn", &u, NOW, 200)
+            .1
+            .iter()
+            .any(|h| h.item.title == "Snap Camera")
+    );
 }

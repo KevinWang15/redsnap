@@ -11,10 +11,14 @@ use redsnap_core::providers::apps::AppEntry;
 const MAX_PER_ROOT: usize = 5_000;
 
 fn roots(extra: &[PathBuf]) -> Vec<PathBuf> {
-    let mut r: Vec<PathBuf> = ["/Applications", "/System/Applications", "/System/Library/CoreServices/Applications"]
-        .iter()
-        .map(PathBuf::from)
-        .collect();
+    let mut r: Vec<PathBuf> = [
+        "/Applications",
+        "/System/Applications",
+        "/System/Library/CoreServices/Applications",
+    ]
+    .iter()
+    .map(PathBuf::from)
+    .collect();
     if let Some(home) = dirs::home_dir() {
         r.push(home.join("Applications"));
     }
@@ -32,7 +36,9 @@ pub fn scan(extra: &[PathBuf]) -> Result<Vec<AppEntry>> {
 }
 
 fn collect(dir: &Path, depth: usize, out: &mut Vec<PathBuf>, start: usize) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in entries.flatten() {
         if out.len() - start >= MAX_PER_ROOT {
             return;
@@ -59,8 +65,12 @@ pub struct BundleInfo {
 }
 
 pub fn bundle_info(bundle: &Path) -> BundleInfo {
-    let Ok(value) = plist::Value::from_file(bundle.join("Contents/Info.plist")) else { return BundleInfo::default() };
-    let Some(d) = value.as_dictionary() else { return BundleInfo::default() };
+    let Ok(value) = plist::Value::from_file(bundle.join("Contents/Info.plist")) else {
+        return BundleInfo::default();
+    };
+    let Some(d) = value.as_dictionary() else {
+        return BundleInfo::default();
+    };
     let s = |k: &str| d.get(k).and_then(|v| v.as_string()).map(str::to_string);
     BundleInfo {
         id: s("CFBundleIdentifier"),
@@ -75,7 +85,9 @@ pub fn bundle_info(bundle: &Path) -> BundleInfo {
 fn finder_name(bundle: &Path) -> Option<String> {
     use objc2_foundation::{NSFileManager, NSString};
     let path = NSString::from_str(&bundle.to_string_lossy());
-    let name = NSFileManager::defaultManager().displayNameAtPath(&path).to_string();
+    let name = NSFileManager::defaultManager()
+        .displayNameAtPath(&path)
+        .to_string();
     Some(name.strip_suffix(".app").unwrap_or(&name).to_string())
 }
 
@@ -87,15 +99,23 @@ fn finder_name(_: &Path) -> Option<String> {
 fn entry(bundle: &Path) -> Option<AppEntry> {
     let info = bundle_info(bundle);
     let stem = bundle.file_stem()?.to_string_lossy().to_string();
-    let name = finder_name(bundle).or(info.display_name.clone()).unwrap_or_else(|| stem.clone());
+    let name = finder_name(bundle)
+        .or(info.display_name.clone())
+        .unwrap_or_else(|| stem.clone());
     let mut aliases = Vec::new();
-    for a in [Some(stem), info.name, info.display_name, info.executable].into_iter().flatten() {
+    for a in [Some(stem), info.name, info.display_name, info.executable]
+        .into_iter()
+        .flatten()
+    {
         if a != name && !aliases.contains(&a) {
             aliases.push(a);
         }
     }
     Some(AppEntry {
-        key: info.id.unwrap_or_else(|| bundle.display().to_string()).to_lowercase(),
+        key: info
+            .id
+            .unwrap_or_else(|| bundle.display().to_string())
+            .to_lowercase(),
         name,
         aliases,
         subtitle: bundle.display().to_string(),
@@ -108,10 +128,21 @@ fn entry(bundle: &Path) -> Option<AppEntry> {
 /// that ship their icon only in an asset catalog get the letter tile until
 /// icons come from NSWorkspace.
 pub fn icon(target: &LaunchTarget, px: u32) -> Option<(usize, usize, Vec<u8>)> {
-    let LaunchTarget::Path(bundle) = target else { return None };
-    let file = bundle_info(bundle).icon_file.unwrap_or_else(|| "AppIcon".into());
-    let file = if file.ends_with(".icns") { file } else { format!("{file}.icns") };
-    let family = icns::IconFamily::read(std::io::BufReader::new(std::fs::File::open(bundle.join("Contents/Resources").join(file)).ok()?)).ok()?;
+    let LaunchTarget::Path(bundle) = target else {
+        return None;
+    };
+    let file = bundle_info(bundle)
+        .icon_file
+        .unwrap_or_else(|| "AppIcon".into());
+    let file = if file.ends_with(".icns") {
+        file
+    } else {
+        format!("{file}.icns")
+    };
+    let family = icns::IconFamily::read(std::io::BufReader::new(
+        std::fs::File::open(bundle.join("Contents/Resources").join(file)).ok()?,
+    ))
+    .ok()?;
     let mut types = family.available_icons();
     types.sort_by_key(|t| {
         let s = t.pixel_width();

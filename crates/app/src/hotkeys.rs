@@ -22,27 +22,44 @@ pub struct Hotkeys {
 }
 
 fn parse(spec: &str, what: &str) -> Result<HotKey, String> {
-    spec.parse::<HotKey>().map_err(|e| format!("The {what} shortcut {spec:?} isn't valid ({e})."))
+    spec.parse::<HotKey>()
+        .map_err(|e| format!("The {what} shortcut {spec:?} isn't valid ({e})."))
 }
 
 impl Hotkeys {
     pub fn new(events: UnboundedSender<Event>) -> Self {
-        let manager = GlobalHotKeyManager::new().map_err(|e| log::error!("hotkeys unavailable: {e}")).ok();
+        let manager = GlobalHotKeyManager::new()
+            .map_err(|e| log::error!("hotkeys unavailable: {e}"))
+            .ok();
         let clip_id = Arc::new(AtomicU32::new(0));
         let id = clip_id.clone();
         GlobalHotKeyEvent::set_event_handler(Some(move |e: GlobalHotKeyEvent| {
             if e.state == HotKeyState::Pressed {
                 let clip = id.load(Ordering::Relaxed);
-                let event = if clip != 0 && e.id == clip { Event::ClipHotkey(Instant::now()) } else { Event::Hotkey(Instant::now()) };
+                let event = if clip != 0 && e.id == clip {
+                    Event::ClipHotkey(Instant::now())
+                } else {
+                    Event::Hotkey(Instant::now())
+                };
                 let _ = events.unbounded_send(event);
             }
         }));
-        Hotkeys { manager, main: None, clip: None, clip_id, suspended: false }
+        Hotkeys {
+            manager,
+            main: None,
+            clip: None,
+            clip_id,
+            suspended: false,
+        }
     }
 
     fn register(&self, key: HotKey, spec: &str, what: &str) -> Result<(), String> {
-        let m = self.manager.as_ref().ok_or("Global shortcuts aren't available on this system.")?;
-        m.register(key).map_err(|e| format!("The {what} shortcut {spec} is taken by another app ({e})."))
+        let m = self
+            .manager
+            .as_ref()
+            .ok_or("Global shortcuts aren't available on this system.")?;
+        m.register(key)
+            .map_err(|e| format!("The {what} shortcut {spec} is taken by another app ({e})."))
     }
 
     fn unregister(&self, key: Option<HotKey>) {
@@ -59,7 +76,9 @@ impl Hotkeys {
             Err(e) => problems.push(e),
         }
         if let Some(spec) = clip {
-            match parse(spec, "clipboard").and_then(|k| self.register(k, spec, "clipboard").map(|_| k)) {
+            match parse(spec, "clipboard")
+                .and_then(|k| self.register(k, spec, "clipboard").map(|_| k))
+            {
                 Ok(k) => self.clip = Some(k),
                 Err(e) => problems.push(e),
             }
@@ -69,7 +88,8 @@ impl Hotkeys {
     }
 
     fn publish(&self) {
-        self.clip_id.store(self.clip.map_or(0, |k| k.id()), Ordering::Relaxed);
+        self.clip_id
+            .store(self.clip.map_or(0, |k| k.id()), Ordering::Relaxed);
     }
 
     /// Changes both shortcuts. New ones are registered first; on failure
@@ -87,7 +107,10 @@ impl Hotkeys {
             return Ok(());
         }
         let mut added = Vec::new();
-        for (key, spec, what) in [(Some(new_main), main, "RedSnap"), (new_clip, clip.unwrap_or(""), "clipboard")] {
+        for (key, spec, what) in [
+            (Some(new_main), main, "RedSnap"),
+            (new_clip, clip.unwrap_or(""), "clipboard"),
+        ] {
             let Some(key) = key else { continue };
             if Some(key) == self.main || Some(key) == self.clip {
                 continue; // already ours

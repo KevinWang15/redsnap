@@ -14,7 +14,8 @@ fn main() -> anyhow::Result<()> {
             img.save(dir.join(format!("redsnap-{size}.png")))?;
         }
         let mut png = Vec::new();
-        image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
         frames.push((size, png));
     }
     // ICO with PNG-compressed frames (Windows Vista and later).

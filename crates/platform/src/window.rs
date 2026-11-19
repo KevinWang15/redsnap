@@ -48,9 +48,8 @@ mod windows {
     use super::{Look, Native, Placement};
     use windows_sys::Win32::Foundation::{HWND, POINT};
     use windows_sys::Win32::Graphics::Dwm::{
-        DWMWA_BORDER_COLOR, DWMWA_CLOAK, DWMWA_COLOR_NONE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
-        DWMWCP_ROUND,
-        DwmSetWindowAttribute,
+        DWMWA_BORDER_COLOR, DWMWA_CLOAK, DWMWA_COLOR_NONE, DWMWA_USE_IMMERSIVE_DARK_MODE,
+        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
     };
     use windows_sys::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
@@ -69,7 +68,11 @@ mod windows {
     /// rectangle, so Windows rounds the window itself, at its only radius
     /// (8 px), and the panel uses the same radius. The fill is see-through
     /// enough for the blur; the query field stays nearly opaque.
-    pub const LOOK: Look = Look { blur: true, radius: 8.0, fill: 0.5 };
+    pub const LOOK: Look = Look {
+        blur: true,
+        radius: 8.0,
+        fill: 0.5,
+    };
 
     /// Dark mode, Windows' own rounded corners, and no Windows border (the
     /// panel draws its own).
@@ -77,11 +80,26 @@ mod windows {
         let h = hwnd(n);
         unsafe {
             let dark: i32 = 1;
-            DwmSetWindowAttribute(h, DWMWA_USE_IMMERSIVE_DARK_MODE as u32, (&dark as *const i32).cast(), 4);
+            DwmSetWindowAttribute(
+                h,
+                DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
+                (&dark as *const i32).cast(),
+                4,
+            );
             let corner = DWMWCP_ROUND;
-            DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE as u32, (&corner as *const i32).cast(), 4);
+            DwmSetWindowAttribute(
+                h,
+                DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+                (&corner as *const i32).cast(),
+                4,
+            );
             let none: u32 = DWMWA_COLOR_NONE;
-            DwmSetWindowAttribute(h, DWMWA_BORDER_COLOR as u32, (&none as *const u32).cast(), 4);
+            DwmSetWindowAttribute(
+                h,
+                DWMWA_BORDER_COLOR as u32,
+                (&none as *const u32).cast(),
+                4,
+            );
         }
     }
 
@@ -104,12 +122,25 @@ mod windows {
             // first show; re-placing on WM_DPICHANGED is still to do.
             let s = scale(n);
             let (pw, ph) = ((size.0 * s) as i32, (size.1 * s) as i32);
-            Placement { x: w.left + (w.right - w.left - pw) / 2, y: w.top + (w.bottom - w.top - ph) / 5 }
+            Placement {
+                x: w.left + (w.right - w.left - pw) / 2,
+                y: w.top + (w.bottom - w.top - ph) / 5,
+            }
         }
     }
 
     pub fn place(n: Native, at: Placement) {
-        unsafe { SetWindowPos(hwnd(n), HWND_TOPMOST, at.x, at.y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE) };
+        unsafe {
+            SetWindowPos(
+                hwnd(n),
+                HWND_TOPMOST,
+                at.x,
+                at.y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+        };
     }
 
     pub fn set_cloaked(n: Native, cloaked: bool) {
@@ -159,25 +190,42 @@ mod linux {
 
     fn conn() -> Option<&'static (RustConnection, usize)> {
         static CONN: OnceLock<Option<(RustConnection, usize)>> = OnceLock::new();
-        CONN.get_or_init(|| x11rb::connect(None).map_err(|e| log::warn!("x11 connect: {e}")).ok()).as_ref()
+        CONN.get_or_init(|| {
+            x11rb::connect(None)
+                .map_err(|e| log::warn!("x11 connect: {e}"))
+                .ok()
+        })
+        .as_ref()
     }
 
     /// No blur yet: a nearly opaque panel with its own 20 px corners on a
     /// transparent window.
-    pub const LOOK: Look = Look { blur: false, radius: 20.0, fill: 0.97 };
+    pub const LOOK: Look = Look {
+        blur: false,
+        radius: 20.0,
+        fill: 0.97,
+    };
 
     pub fn setup(_: Native) {}
 
     pub fn placement_at_cursor(_: Native, size: (f32, f32)) -> Placement {
-        let Some((c, screen)) = conn() else { return Placement { x: 0, y: 0 } };
+        let Some((c, screen)) = conn() else {
+            return Placement { x: 0, y: 0 };
+        };
         let s = &c.setup().roots[*screen];
         let (w, h) = (s.width_in_pixels as i32, s.height_in_pixels as i32);
-        Placement { x: (w - size.0 as i32) / 2, y: (h - size.1 as i32) / 5 }
+        Placement {
+            x: (w - size.0 as i32) / 2,
+            y: (h - size.1 as i32) / 5,
+        }
     }
 
     pub fn place(n: Native, at: Placement) {
         if let Some((c, _)) = conn() {
-            let aux = ConfigureWindowAux::new().x(at.x).y(at.y).stack_mode(StackMode::ABOVE);
+            let aux = ConfigureWindowAux::new()
+                .x(at.x)
+                .y(at.y)
+                .stack_mode(StackMode::ABOVE);
             let _ = c.configure_window(n.0 as u32, &aux);
             let _ = c.flush();
         }
@@ -227,14 +275,20 @@ mod macos {
     pub fn keep_awake() {
         use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
         let reason = NSString::from_str("RedSnap latency bench");
-        let token = NSProcessInfo::processInfo()
-            .beginActivityWithOptions_reason(NSActivityOptions::UserInitiated | NSActivityOptions::LatencyCritical, &reason);
+        let token = NSProcessInfo::processInfo().beginActivityWithOptions_reason(
+            NSActivityOptions::UserInitiated | NSActivityOptions::LatencyCritical,
+            &reason,
+        );
         std::mem::forget(token);
     }
 
     /// No blur yet: a nearly opaque panel with its own 20 px corners on a
     /// transparent window.
-    pub const LOOK: Look = Look { blur: false, radius: 20.0, fill: 0.97 };
+    pub const LOOK: Look = Look {
+        blur: false,
+        radius: 20.0,
+        fill: 0.97,
+    };
 
     pub fn setup(_: Native) {}
     pub fn placement_at_cursor(_: Native, _: (f32, f32)) -> Placement {

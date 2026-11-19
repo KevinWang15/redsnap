@@ -16,7 +16,11 @@
 /// elsewhere (`secondary!("enter")`).
 macro_rules! secondary {
     ($key:literal) => {
-        if cfg!(target_os = "macos") { concat!("cmd-", $key) } else { concat!("ctrl-", $key) }
+        if cfg!(target_os = "macos") {
+            concat!("cmd-", $key)
+        } else {
+            concat!("ctrl-", $key)
+        }
     };
 }
 
@@ -45,7 +49,12 @@ struct Args {
 }
 
 fn parse_args() -> Result<Args> {
-    let mut a = Args { command: None, background: false, profile: None, perf: None };
+    let mut a = Args {
+        command: None,
+        background: false,
+        profile: None,
+        perf: None,
+    };
     for arg in std::env::args().skip(1) {
         let (k, v) = arg.split_once('=').unwrap_or((arg.as_str(), ""));
         match k {
@@ -67,7 +76,9 @@ fn parse_args() -> Result<Args> {
 fn init_logging(logs: &Path) {
     let path = logs.join("redsnap.log");
     let _ = std::fs::rename(&path, logs.join("redsnap.log.1"));
-    let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info,blade_graphics=warn,naga=warn"));
+    let mut builder = env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("info,blade_graphics=warn,naga=warn"),
+    );
     if let Ok(file) = File::create(&path) {
         builder.target(env_logger::Target::Pipe(Box::new(file)));
     }
@@ -103,7 +114,9 @@ fn main() -> Result<()> {
     })? {
         Acquired::Secondary(client) => {
             // Already running: pass the command on (plain `redsnap` shows it).
-            return client.send(args.command.unwrap_or(CliCommand::Show)).context("talking to the running RedSnap");
+            return client
+                .send(args.command.unwrap_or(CliCommand::Show))
+                .context("talking to the running RedSnap");
         }
         Acquired::Primary => {}
     }
@@ -116,6 +129,17 @@ fn main() -> Result<()> {
     if let Some(p) = &args.perf {
         perf::init(p, "now");
     }
-    log::info!("RedSnap {} starting; data in {}", env!("CARGO_PKG_VERSION"), paths.data.display());
-    app::run(paths, app::Options { background: args.background }, tx, rx)
+    log::info!(
+        "RedSnap {} starting; data in {}",
+        env!("CARGO_PKG_VERSION"),
+        paths.data.display()
+    );
+    app::run(
+        paths,
+        app::Options {
+            background: args.background,
+        },
+        tx,
+        rx,
+    )
 }

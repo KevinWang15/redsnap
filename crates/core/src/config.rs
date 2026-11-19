@@ -78,7 +78,10 @@ impl Default for Snippets {
         Snippets {
             expand_as_you_type: true,
             excluded_apps: Vec::new(),
-            items: vec![item("date", "Today's date", ";date", "{{date}}"), item("now", "Date and time", ";now", "{{datetime}}")],
+            items: vec![
+                item("date", "Today's date", ";date", "{{date}}"),
+                item("now", "Date and time", ";now", "{{datetime}}"),
+            ],
         }
     }
 }
@@ -104,7 +107,11 @@ impl Default for Clipboard {
         Clipboard {
             enabled: true,
             // Alfred's clipboard shortcut is Option+Cmd+C; the same letter elsewhere.
-            hotkey: if cfg!(target_os = "macos") { "Alt+Super+C".into() } else { "Ctrl+Alt+C".into() },
+            hotkey: if cfg!(target_os = "macos") {
+                "Alt+Super+C".into()
+            } else {
+                "Ctrl+Alt+C".into()
+            },
             keep_days: 30,
             max_entries: 5000,
             excluded_apps: Vec::new(),
@@ -181,10 +188,20 @@ impl Default for Config {
                 files: true,
             },
             web_searches: vec![
-                search("google", "Google", "g", "https://www.google.com/search?q={query}"),
+                search(
+                    "google",
+                    "Google",
+                    "g",
+                    "https://www.google.com/search?q={query}",
+                ),
                 search("bing", "Bing", "b", "https://www.bing.com/search?q={query}"),
                 search("baidu", "Baidu", "bd", "https://www.baidu.com/s?wd={query}"),
-                search("github", "GitHub", "gh", "https://github.com/search?q={query}"),
+                search(
+                    "github",
+                    "GitHub",
+                    "gh",
+                    "https://github.com/search?q={query}",
+                ),
             ],
             quick_links: Vec::new(),
             app_aliases: BTreeMap::new(),
@@ -215,7 +232,11 @@ impl Config {
             .web_searches
             .iter()
             .map(|w| ("webSearches", &w.id, &w.keyword, &w.url))
-            .chain(self.quick_links.iter().map(|l| ("quickLinks", &l.id, &l.keyword, &l.url)))
+            .chain(
+                self.quick_links
+                    .iter()
+                    .map(|l| ("quickLinks", &l.id, &l.keyword, &l.url)),
+            )
         {
             if id.trim().is_empty() || !ids.insert(id.as_str()) {
                 bail!("{field}: id {id:?} is empty or used twice");
@@ -231,10 +252,16 @@ impl Config {
             }
         }
         if !(1..=3650).contains(&self.clipboard.keep_days) {
-            bail!("clipboard.keepDays: must be 1 to 3650, found {}", self.clipboard.keep_days);
+            bail!(
+                "clipboard.keepDays: must be 1 to 3650, found {}",
+                self.clipboard.keep_days
+            );
         }
         if !(10..=100_000).contains(&self.clipboard.max_entries) {
-            bail!("clipboard.maxEntries: must be 10 to 100000, found {}", self.clipboard.max_entries);
+            bail!(
+                "clipboard.maxEntries: must be 10 to 100000, found {}",
+                self.clipboard.max_entries
+            );
         }
         self.validate_snippets()?;
         if self.web_searches.iter().any(|w| !w.url.contains("{query}")) {
@@ -250,7 +277,11 @@ impl Config {
             bail!("snippets: at most 2000");
         }
         for s in items {
-            let label = if s.name.is_empty() { s.trigger.as_str() } else { s.name.as_str() };
+            let label = if s.name.is_empty() {
+                s.trigger.as_str()
+            } else {
+                s.name.as_str()
+            };
             if s.id.trim().is_empty() || !ids.insert(s.id.as_str()) {
                 bail!("snippets: id {:?} is empty or used twice", s.id);
             }
@@ -263,7 +294,8 @@ impl Config {
             if s.text.chars().count() > 100_000 {
                 bail!("snippet {label:?}: the text is longer than 100,000 characters");
             }
-            crate::snippets::check(&s.text).map_err(|e| anyhow::anyhow!("snippet {label:?}: {e}"))?;
+            crate::snippets::check(&s.text)
+                .map_err(|e| anyhow::anyhow!("snippet {label:?}: {e}"))?;
         }
         // A trigger that starts another would always fire first.
         let triggers: Vec<&Snippet> = items.iter().filter(|s| !s.trigger.is_empty()).collect();
@@ -278,7 +310,10 @@ impl Config {
                 if b.trigger.starts_with(&a.trigger) && (a.auto_expand && b.auto_expand) {
                     bail!(
                         "snippets: the trigger {:?} is the start of {:?}, so typing {:?} would always expand {:?} first",
-                        a.trigger, b.trigger, b.trigger, a.trigger
+                        a.trigger,
+                        b.trigger,
+                        b.trigger,
+                        a.trigger
                     );
                 }
             }
@@ -318,18 +353,33 @@ pub fn load(dir: &Path) -> Result<Loaded> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             let config = Config::default();
             save(dir, &config)?;
-            return Ok(Loaded { config, problem: None });
+            return Ok(Loaded {
+                config,
+                problem: None,
+            });
         }
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
     };
     match Config::from_json(&text) {
-        Ok(config) => Ok(Loaded { config, problem: None }),
+        Ok(config) => Ok(Loaded {
+            config,
+            problem: None,
+        }),
         Err(error) => {
-            let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            let stamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
             let aside = dir.join(format!("config.invalid-{stamp}.json"));
-            fs::rename(&path, &aside).with_context(|| format!("moving {} aside", path.display()))?;
-            let backup = fs::read_to_string(dir.join("config.json.bak")).ok().and_then(|t| Config::from_json(&t).ok());
-            let used = if backup.is_some() { "the last good settings" } else { "the default settings" };
+            fs::rename(&path, &aside)
+                .with_context(|| format!("moving {} aside", path.display()))?;
+            let backup = fs::read_to_string(dir.join("config.json.bak"))
+                .ok()
+                .and_then(|t| Config::from_json(&t).ok());
+            let used = if backup.is_some() {
+                "the last good settings"
+            } else {
+                "the default settings"
+            };
             let config = backup.unwrap_or_default();
             save(dir, &config)?;
             Ok(Loaded {
@@ -370,7 +420,10 @@ fn rename_with_retry(from: &Path, to: &Path) -> Result<()> {
     loop {
         match fs::rename(from, to) {
             Ok(()) => return Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied && waited < Duration::from_secs(5) => {
+            Err(e)
+                if e.kind() == std::io::ErrorKind::PermissionDenied
+                    && waited < Duration::from_secs(5) =>
+            {
                 std::thread::sleep(delay);
                 waited += delay;
                 delay = (delay * 2).min(Duration::from_millis(200));
@@ -461,14 +514,27 @@ mod tests {
         c.web_searches[1].keyword = "g".into();
         assert!(c.validate().unwrap_err().to_string().contains("used twice"));
         let mut c = Config::default();
-        c.quick_links.push(QuickLink { id: "x".into(), name: "x".into(), keyword: "".into(), url: "file:///etc".into() });
-        assert!(c.validate().unwrap_err().to_string().starts_with("quickLinks"));
+        c.quick_links.push(QuickLink {
+            id: "x".into(),
+            name: "x".into(),
+            keyword: "".into(),
+            url: "file:///etc".into(),
+        });
+        assert!(
+            c.validate()
+                .unwrap_err()
+                .to_string()
+                .starts_with("quickLinks")
+        );
     }
 
     #[test]
     fn malformed_file_is_moved_aside_and_backup_used() {
         let dir = tempfile::tempdir().unwrap();
-        let c = Config { rows: 7, ..Default::default() };
+        let c = Config {
+            rows: 7,
+            ..Default::default()
+        };
         save(dir.path(), &c).unwrap();
         save(dir.path(), &c).unwrap(); // makes config.json.bak
         fs::write(dir.path().join("config.json"), "{ not json").unwrap();
@@ -479,7 +545,11 @@ mod tests {
         let moved = fs::read_dir(dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
-            .any(|e| e.file_name().to_string_lossy().starts_with("config.invalid-"));
+            .any(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("config.invalid-")
+            });
         assert!(moved);
     }
 
@@ -494,10 +564,27 @@ mod tests {
     #[test]
     fn snippet_validation() {
         let mut c = Config::default();
-        c.snippets.items.push(Snippet { id: "d2".into(), name: "x".into(), trigger: ";dates".into(), text: "x".into(), auto_expand: true });
-        assert!(c.validate().unwrap_err().to_string().contains("is the start of"));
+        c.snippets.items.push(Snippet {
+            id: "d2".into(),
+            name: "x".into(),
+            trigger: ";dates".into(),
+            text: "x".into(),
+            auto_expand: true,
+        });
+        assert!(
+            c.validate()
+                .unwrap_err()
+                .to_string()
+                .contains("is the start of")
+        );
         c.snippets.items.pop();
-        c.snippets.items.push(Snippet { id: "bad".into(), name: "Bad".into(), trigger: ";b".into(), text: "{{nope}}".into(), auto_expand: true });
+        c.snippets.items.push(Snippet {
+            id: "bad".into(),
+            name: "Bad".into(),
+            trigger: ";b".into(),
+            text: "{{nope}}".into(),
+            auto_expand: true,
+        });
         assert!(c.validate().unwrap_err().to_string().contains("\"Bad\""));
     }
 

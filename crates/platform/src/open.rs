@@ -11,7 +11,10 @@ use redsnap_core::item::{LaunchTarget, SystemCommand, url_allowed};
 /// Starts a program without waiting for it and without a console window.
 fn spawn(program: &str, args: &[&std::ffi::OsStr]) -> Result<()> {
     let mut cmd = Command::new(program);
-    cmd.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -98,7 +101,10 @@ pub fn open_path(path: &Path) -> Result<()> {
 /// Shows `path` selected in Explorer / Finder, or opens its folder on Linux.
 pub fn reveal(path: &Path) -> Result<()> {
     #[cfg(windows)]
-    return spawn("explorer.exe", &[format!("/select,{}", path.display()).as_ref()]);
+    return spawn(
+        "explorer.exe",
+        &[format!("/select,{}", path.display()).as_ref()],
+    );
     #[cfg(target_os = "macos")]
     return spawn("open", &["-R".as_ref(), path.as_os_str()]);
     #[cfg(target_os = "linux")]
@@ -117,7 +123,8 @@ pub fn launch(target: &LaunchTarget) -> Result<()> {
             // gio and gtk-launch both honor the desktop file's Exec, Path and
             // Terminal keys.
             let id = id.trim_end_matches(".desktop");
-            spawn("gtk-launch", &[id.as_ref()]).or_else(|_| spawn("gio", &["launch".as_ref(), id.as_ref()]))
+            spawn("gtk-launch", &[id.as_ref()])
+                .or_else(|_| spawn("gio", &["launch".as_ref(), id.as_ref()]))
         }
         #[cfg(not(target_os = "linux"))]
         LaunchTarget::Desktop { .. } => bail!("desktop files exist only on Linux"),
@@ -138,8 +145,12 @@ pub fn run_system(cmd: SystemCommand) -> Result<()> {
 mod imp {
     use super::*;
     use windows_sys::Win32::System::Power::SetSuspendState;
-    use windows_sys::Win32::System::Shutdown::{EWX_LOGOFF, ExitWindowsEx, LockWorkStation, SHTDN_REASON_FLAG_PLANNED};
-    use windows_sys::Win32::UI::Shell::{SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI, SHERB_NOSOUND, SHEmptyRecycleBinW};
+    use windows_sys::Win32::System::Shutdown::{
+        EWX_LOGOFF, ExitWindowsEx, LockWorkStation, SHTDN_REASON_FLAG_PLANNED,
+    };
+    use windows_sys::Win32::UI::Shell::{
+        SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI, SHERB_NOSOUND, SHEmptyRecycleBinW,
+    };
 
     pub fn run(cmd: SystemCommand) -> Result<()> {
         let ok = unsafe {
@@ -148,8 +159,18 @@ mod imp {
                 SystemCommand::Sleep => SetSuspendState(false, false, false),
                 SystemCommand::LogOut => ExitWindowsEx(EWX_LOGOFF, SHTDN_REASON_FLAG_PLANNED) != 0,
                 // shutdown.exe holds the privilege dance (SE_SHUTDOWN_NAME).
-                SystemCommand::Restart => return spawn("shutdown.exe", &["/r".as_ref(), "/t".as_ref(), "0".as_ref()]),
-                SystemCommand::ShutDown => return spawn("shutdown.exe", &["/s".as_ref(), "/t".as_ref(), "0".as_ref()]),
+                SystemCommand::Restart => {
+                    return spawn(
+                        "shutdown.exe",
+                        &["/r".as_ref(), "/t".as_ref(), "0".as_ref()],
+                    );
+                }
+                SystemCommand::ShutDown => {
+                    return spawn(
+                        "shutdown.exe",
+                        &["/s".as_ref(), "/t".as_ref(), "0".as_ref()],
+                    );
+                }
                 SystemCommand::EmptyTrash => {
                     let flags = SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND;
                     let hr = SHEmptyRecycleBinW(std::ptr::null_mut(), std::ptr::null(), flags);
@@ -199,8 +220,16 @@ mod imp {
             SystemCommand::EmptyTrash => &["gio", "trash", "--empty"],
         };
         let session = std::env::var("XDG_SESSION_ID").unwrap_or_default();
-        let rest: Vec<&std::ffi::OsStr> =
-            args[1..].iter().map(|a| if a.is_empty() { session.as_ref() } else { a.as_ref() }).collect();
+        let rest: Vec<&std::ffi::OsStr> = args[1..]
+            .iter()
+            .map(|a| {
+                if a.is_empty() {
+                    session.as_ref()
+                } else {
+                    a.as_ref()
+                }
+            })
+            .collect();
         spawn(args[0], &rest)
     }
 }

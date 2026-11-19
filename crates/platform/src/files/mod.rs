@@ -50,7 +50,9 @@ impl FileSearch {
     /// Starts the thread. `done` is called on it with each answer.
     pub fn start(done: Box<dyn Fn(FileResults) + Send>) -> anyhow::Result<Self> {
         let (tx, rx) = mpsc::channel();
-        std::thread::Builder::new().name("files".into()).spawn(move || run(rx, done))?;
+        std::thread::Builder::new()
+            .name("files".into())
+            .spawn(move || run(rx, done))?;
         Ok(FileSearch { tx })
     }
 
@@ -89,7 +91,12 @@ fn list(dir: &Path, limit: usize) -> Outcome {
             let meta = std::fs::metadata(&path).or_else(|_| e.metadata()).ok();
             let is_dir = meta.as_ref().is_some_and(|m| m.is_dir());
             let hidden = name.starts_with('.') || meta.as_ref().is_some_and(hidden_by_os);
-            FileHit { path, name, is_dir, hidden }
+            FileHit {
+                path,
+                name,
+                is_dir,
+                hidden,
+            }
         })
         .collect();
     Outcome::Hits(hits)
@@ -116,9 +123,17 @@ fn hits_for(paths: impl IntoIterator<Item = std::path::PathBuf>) -> Vec<FileHit>
         .into_iter()
         .filter_map(|path| {
             let meta = std::fs::metadata(&path).ok()?;
-            let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+            let name = path.file_name().map_or_else(
+                || path.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            );
             let hidden = name.starts_with('.');
-            Some(FileHit { name, is_dir: meta.is_dir(), hidden, path })
+            Some(FileHit {
+                name,
+                is_dir: meta.is_dir(),
+                hidden,
+                path,
+            })
         })
         .collect()
 }
@@ -133,11 +148,26 @@ mod tests {
         std::fs::create_dir(dir.path().join("sub")).unwrap();
         std::fs::write(dir.path().join("a.txt"), "x").unwrap();
         std::fs::write(dir.path().join(".hidden"), "x").unwrap();
-        let Outcome::Hits(mut hits) = list(dir.path(), 100) else { panic!() };
+        let Outcome::Hits(mut hits) = list(dir.path(), 100) else {
+            panic!()
+        };
         hits.sort_by(|a, b| a.name.cmp(&b.name));
-        let got: Vec<(&str, bool, bool)> = hits.iter().map(|h| (h.name.as_str(), h.is_dir, h.hidden)).collect();
-        assert_eq!(got, [(".hidden", false, true), ("a.txt", false, false), ("sub", true, false)]);
-        assert!(matches!(list(&dir.path().join("missing"), 100), Outcome::Failed(_)));
+        let got: Vec<(&str, bool, bool)> = hits
+            .iter()
+            .map(|h| (h.name.as_str(), h.is_dir, h.hidden))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (".hidden", false, true),
+                ("a.txt", false, false),
+                ("sub", true, false)
+            ]
+        );
+        assert!(matches!(
+            list(&dir.path().join("missing"), 100),
+            Outcome::Failed(_)
+        ));
     }
 
     #[test]

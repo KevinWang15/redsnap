@@ -56,16 +56,17 @@ impl Usage {
     /// picked for it.
     pub fn query_boost(&self, folded_query: &str, id: &ItemId, now: i64) -> u32 {
         let key: String = folded_query.chars().take(MAX_PREFIX_CHARS).collect();
-        self.picks
-            .get(&key)
-            .and_then(|m| m.get(id))
-            .map_or(0, |u| (u.count as f32 * 100.0 * recency(now, u.last_used)) as u32)
+        self.picks.get(&key).and_then(|m| m.get(id)).map_or(0, |u| {
+            (u.count as f32 * 100.0 * recency(now, u.last_used)) as u32
+        })
     }
 
     /// A small bonus for items used often and recently, whatever the query.
     /// At most 150, well below the gap between match classes.
     pub fn global(&self, id: &ItemId, now: i64) -> u32 {
-        self.items.get(id).map_or(0, |u| (u.count.min(MAX_COUNT) as f32 * 5.0 + 50.0 * recency(now, u.last_used)) as u32)
+        self.items.get(id).map_or(0, |u| {
+            (u.count.min(MAX_COUNT) as f32 * 5.0 + 50.0 * recency(now, u.last_used)) as u32
+        })
     }
 
     pub fn item(&self, id: &ItemId) -> Option<Use> {
@@ -78,7 +79,13 @@ impl Usage {
             u.last_used = u.last_used.max(at);
         };
         for p in prefixes {
-            bump(self.picks.entry(p.clone()).or_default().entry(id.clone()).or_default());
+            bump(
+                self.picks
+                    .entry(p.clone())
+                    .or_default()
+                    .entry(id.clone())
+                    .or_default(),
+            );
         }
         bump(self.items.entry(id.clone()).or_default());
     }
@@ -107,7 +114,9 @@ impl UsageStore {
         let snapshot = Arc::new(ArcSwap::from_pointee(usage));
         let (tx, rx) = mpsc::channel();
         let shared = snapshot.clone();
-        thread::Builder::new().name("usage-store".into()).spawn(move || run(conn, rx, shared))?;
+        thread::Builder::new()
+            .name("usage-store".into())
+            .spawn(move || run(conn, rx, shared))?;
         Ok(UsageStore { tx, snapshot })
     }
 
@@ -119,14 +128,21 @@ impl UsageStore {
     /// Records that `id` was picked for `query`. Returns at once; the snapshot
     /// changes when the write has committed.
     pub fn record_pick(&self, query: &str, id: &ItemId, at: i64) {
-        let _ = self.tx.send(Cmd::Pick { query: query.to_string(), id: id.clone(), at });
+        let _ = self.tx.send(Cmd::Pick {
+            query: query.to_string(),
+            id: id.clone(),
+            at,
+        });
     }
 
     /// Forgets everything learned.
     pub fn reset(&self) -> Result<()> {
         let (tx, rx) = mpsc::channel();
-        self.tx.send(Cmd::Reset(tx)).map_err(|_| anyhow::anyhow!("usage store stopped"))?;
-        rx.recv().map_err(|_| anyhow::anyhow!("usage store stopped"))?
+        self.tx
+            .send(Cmd::Reset(tx))
+            .map_err(|_| anyhow::anyhow!("usage store stopped"))?;
+        rx.recv()
+            .map_err(|_| anyhow::anyhow!("usage store stopped"))?
     }
 
     /// Waits until every earlier command has been handled (for tests and
@@ -142,7 +158,9 @@ impl UsageStore {
 fn prefixes(query: &str) -> Vec<String> {
     let folded = text::fold(query.trim());
     let chars: Vec<char> = folded.chars().take(MAX_PREFIX_CHARS).collect();
-    (1..=chars.len()).map(|n| chars[..n].iter().collect()).collect()
+    (1..=chars.len())
+        .map(|n| chars[..n].iter().collect())
+        .collect()
 }
 
 fn init(conn: &Connection) -> Result<()> {
@@ -173,16 +191,32 @@ fn init(conn: &Connection) -> Result<()> {
 
 fn load(conn: &Connection) -> Result<Usage> {
     let mut usage = Usage::default();
-    let mut stmt = conn.prepare("SELECT query_prefix, item_id, count, last_used FROM query_pick")?;
+    let mut stmt =
+        conn.prepare("SELECT query_prefix, item_id, count, last_used FROM query_pick")?;
     let rows = stmt.query_map([], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, u32>(2)?, r.get::<_, i64>(3)?))
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, u32>(2)?,
+            r.get::<_, i64>(3)?,
+        ))
     })?;
     for row in rows {
         let (q, id, count, last_used) = row?;
-        usage.picks.entry(q).or_default().insert(ItemId(id), Use { count, last_used });
+        usage
+            .picks
+            .entry(q)
+            .or_default()
+            .insert(ItemId(id), Use { count, last_used });
     }
     let mut stmt = conn.prepare("SELECT item_id, count, last_used FROM item_use")?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u32>(1)?, r.get::<_, i64>(2)?)))?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, u32>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
+    })?;
     for row in rows {
         let (id, count, last_used) = row?;
         usage.items.insert(ItemId(id), Use { count, last_used });
@@ -295,7 +329,10 @@ mod tests {
     fn other_schema_versions_are_refused() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("usage.db");
-        Connection::open(&path).unwrap().pragma_update(None, "user_version", 7).unwrap();
+        Connection::open(&path)
+            .unwrap()
+            .pragma_update(None, "user_version", 7)
+            .unwrap();
         assert!(UsageStore::open(&path).is_err());
     }
 }

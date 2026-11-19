@@ -42,13 +42,21 @@ pub fn check(template: &str) -> Result<(), String> {
                 p if p.starts_with("date:") => {
                     let f = &p[5..];
                     if f.is_empty() || f.len() > MAX_FORMAT {
-                        return Err(format!("{{{{{p}}}}}: the date format must be 1 to {MAX_FORMAT} characters"));
+                        return Err(format!(
+                            "{{{{{p}}}}}: the date format must be 1 to {MAX_FORMAT} characters"
+                        ));
                     }
-                    if chrono::format::StrftimeItems::new(f).any(|i| matches!(i, chrono::format::Item::Error)) {
+                    if chrono::format::StrftimeItems::new(f)
+                        .any(|i| matches!(i, chrono::format::Item::Error))
+                    {
                         return Err(format!("{{{{{p}}}}}: {f:?} isn't a valid date format"));
                     }
                 }
-                other => return Err(format!("{{{{{other}}}}} isn't a placeholder (cursor, date, time, datetime, date:FORMAT, clipboard)")),
+                other => {
+                    return Err(format!(
+                        "{{{{{other}}}}} isn't a placeholder (cursor, date, time, datetime, date:FORMAT, clipboard)"
+                    ));
+                }
             },
             Token::Unclosed => return Err("a {{ without its }}".into()),
         }
@@ -68,7 +76,9 @@ pub fn render(template: &str, cx: &Context) -> Rendered {
             Token::Placeholder("cursor") => cursor_at = Some(text.chars().count()),
             Token::Placeholder("date") => text.push_str(&cx.now.format("%Y-%m-%d").to_string()),
             Token::Placeholder("time") => text.push_str(&cx.now.format("%H:%M").to_string()),
-            Token::Placeholder("datetime") => text.push_str(&cx.now.format("%Y-%m-%d %H:%M").to_string()),
+            Token::Placeholder("datetime") => {
+                text.push_str(&cx.now.format("%Y-%m-%d %H:%M").to_string())
+            }
             Token::Placeholder("clipboard") => text.push_str(cx.clipboard.as_deref().unwrap_or("")),
             Token::Placeholder(p) if p.starts_with("date:") => {
                 // Formats are checked on save; a bad one renders as written.
@@ -87,7 +97,10 @@ pub fn render(template: &str, cx: &Context) -> Rendered {
         }
     }
     let total = text.chars().count();
-    Rendered { cursor_back: cursor_at.map_or(0, |at| total - at), text }
+    Rendered {
+        cursor_back: cursor_at.map_or(0, |at| total - at),
+        text,
+    }
 }
 
 enum Token<'a> {
@@ -182,7 +195,10 @@ pub struct Found {
 
 impl Typed {
     pub fn new() -> Self {
-        Typed { chars: Vec::new(), from_reset: true }
+        Typed {
+            chars: Vec::new(),
+            from_reset: true,
+        }
     }
 
     pub fn reset(&mut self) {
@@ -226,7 +242,10 @@ impl Typed {
                 true
             };
             if boundary {
-                let found = Found { snippet_id: id.clone(), erase: t.len() };
+                let found = Found {
+                    snippet_id: id.clone(),
+                    erase: t.len(),
+                };
                 self.reset();
                 return Some(found);
             }
@@ -241,12 +260,18 @@ mod tests {
     use chrono::TimeZone;
 
     fn cx() -> Context {
-        Context { now: Local.with_ymd_and_hms(2026, 11, 19, 14, 5, 0).unwrap(), clipboard: Some("CLIP".into()) }
+        Context {
+            now: Local.with_ymd_and_hms(2026, 11, 19, 14, 5, 0).unwrap(),
+            clipboard: Some("CLIP".into()),
+        }
     }
 
     #[test]
     fn placeholders() {
-        assert_eq!(render("Hi {{clipboard}}, it's {{date}} {{time}}", &cx()).text, "Hi CLIP, it's 2026-11-19 14:05");
+        assert_eq!(
+            render("Hi {{clipboard}}, it's {{date}} {{time}}", &cx()).text,
+            "Hi CLIP, it's 2026-11-19 14:05"
+        );
         assert_eq!(render("{{date:%d/%m/%Y}}", &cx()).text, "19/11/2026");
         assert_eq!(render("{{datetime}}", &cx()).text, "2026-11-19 14:05");
         assert_eq!(render("a \\{{x}} b", &cx()).text, "a {{x}} b");
@@ -258,14 +283,28 @@ mod tests {
     #[test]
     fn checking() {
         assert!(check("ok {{date}} {{cursor}}").is_ok());
-        assert!(check("{{nope}}").unwrap_err().contains("isn't a placeholder"));
-        assert!(check("{{cursor}}{{cursor}}").unwrap_err().contains("only once"));
+        assert!(
+            check("{{nope}}")
+                .unwrap_err()
+                .contains("isn't a placeholder")
+        );
+        assert!(
+            check("{{cursor}}{{cursor}}")
+                .unwrap_err()
+                .contains("only once")
+        );
         assert!(check("{{date").unwrap_err().contains("without"));
         assert!(check("{{date:%Q}}").is_err());
     }
 
     fn snippet(trigger: &str, id: &str) -> Snippet {
-        Snippet { id: id.into(), name: id.into(), trigger: trigger.into(), text: "x".into(), auto_expand: true }
+        Snippet {
+            id: id.into(),
+            name: id.into(),
+            trigger: trigger.into(),
+            text: "x".into(),
+            auto_expand: true,
+        }
     }
 
     fn typing(triggers: &Triggers, s: &str) -> Vec<Found> {
@@ -278,13 +317,33 @@ mod tests {
         // (A trigger that starts another one is refused by config validation:
         // it would always fire first.)
         let tr = Triggers::new(&[snippet(";sig", "short"), snippet("brb", "brb")]);
-        assert_eq!(typing(&tr, "x;sig"), [Found { snippet_id: "short".into(), erase: 4 }]);
-        assert_eq!(typing(&tr, "ok brb"), [Found { snippet_id: "brb".into(), erase: 3 }]);
+        assert_eq!(
+            typing(&tr, "x;sig"),
+            [Found {
+                snippet_id: "short".into(),
+                erase: 4
+            }]
+        );
+        assert_eq!(
+            typing(&tr, "ok brb"),
+            [Found {
+                snippet_id: "brb".into(),
+                erase: 3
+            }]
+        );
         assert!(typing(&tr, "abrb").is_empty(), "inside a word");
         assert_eq!(typing(&tr, "brb").len(), 1, "a reset counts as a boundary");
         let tr = Triggers::new(&[snippet(";a", "a"), snippet("x;a", "xa")]);
-        assert_eq!(typing(&tr, " x;a")[0].snippet_id, "xa", "the longer trigger wins");
-        assert_eq!(typing(&tr, "zx;a")[0].snippet_id, "a", "x;a would start inside a word");
+        assert_eq!(
+            typing(&tr, " x;a")[0].snippet_id,
+            "xa",
+            "the longer trigger wins"
+        );
+        assert_eq!(
+            typing(&tr, "zx;a")[0].snippet_id,
+            "a",
+            "x;a would start inside a word"
+        );
     }
 
     #[test]
@@ -295,7 +354,10 @@ mod tests {
             assert!(t.push(c, &tr).is_none());
         }
         t.reset();
-        assert!(t.push('g', &tr).is_none(), "a click in between breaks the trigger");
+        assert!(
+            t.push('g', &tr).is_none(),
+            "a click in between breaks the trigger"
+        );
         let mut t = Typed::new();
         for c in ";sx".chars() {
             t.push(c, &tr);

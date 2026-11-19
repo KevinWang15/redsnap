@@ -49,13 +49,19 @@ fn version_of(target: &LaunchTarget) -> String {
 }
 
 fn cache_file(dir: &Path, id: &ItemId, version: &str) -> PathBuf {
-    let h = format!("{}|{version}|{PX}", id.as_str()).bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+    let h = format!("{}|{version}|{PX}", id.as_str())
+        .bytes()
+        .fold(0xcbf29ce484222325u64, |h, b| {
+            (h ^ b as u64).wrapping_mul(0x100000001b3)
+        });
     dir.join(format!("{h:016x}.png"))
 }
 
 fn to_image(w: usize, h: usize, bgra: Vec<u8>) -> Option<Arc<RenderImage>> {
     let buf = image::RgbaImage::from_raw(w as u32, h as u32, bgra)?;
-    Some(Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(buf)])))
+    Some(Arc::new(RenderImage::new(smallvec::smallvec![
+        image::Frame::new(buf)
+    ])))
 }
 
 /// One icon: from the disk cache, or from the OS (then cached).
@@ -87,7 +93,10 @@ fn load(dir: &Path, r: &Request) -> Option<Arc<RenderImage>> {
 impl Icons {
     /// Starts the loader thread. `done` is called on it after each icon; the
     /// app turns that into a repaint.
-    pub fn start(cache_dir: PathBuf, done: impl Fn(ItemId, Option<Arc<RenderImage>>) + Send + 'static) -> Self {
+    pub fn start(
+        cache_dir: PathBuf,
+        done: impl Fn(ItemId, Option<Arc<RenderImage>>) + Send + 'static,
+    ) -> Self {
         let _ = std::fs::create_dir_all(&cache_dir);
         let (visible, visible_rx) = mpsc::channel();
         let (background, background_rx) = mpsc::channel();
@@ -95,7 +104,11 @@ impl Icons {
             .name("icons".into())
             .spawn(move || run(cache_dir, visible_rx, background_rx, done))
             .expect("icon thread");
-        Icons { state: Mutex::new(State::default()), visible, background }
+        Icons {
+            state: Mutex::new(State::default()),
+            visible,
+            background,
+        }
     }
 
     /// The icon if it's loaded; otherwise asks for it (visible rows go first)
@@ -106,7 +119,11 @@ impl Icons {
             return icon.clone();
         }
         if s.pending.insert(id.clone()) {
-            let _ = self.visible.send(Request { id: id.clone(), target: target.clone(), version: version_of(target) });
+            let _ = self.visible.send(Request {
+                id: id.clone(),
+                target: target.clone(),
+                version: version_of(target),
+            });
         }
         None
     }
@@ -117,7 +134,11 @@ impl Icons {
         for (id, target) in apps {
             if !s.loaded.contains_key(&id) && s.pending.insert(id.clone()) {
                 let version = version_of(&target);
-                let _ = self.background.send(Request { id, target, version });
+                let _ = self.background.send(Request {
+                    id,
+                    target,
+                    version,
+                });
             }
         }
     }
@@ -143,11 +164,13 @@ fn run(
             Err(TryRecvError::Empty) => match background.try_recv() {
                 Ok(r) => r,
                 Err(TryRecvError::Disconnected) => return,
-                Err(TryRecvError::Empty) => match visible.recv_timeout(std::time::Duration::from_millis(200)) {
-                    Ok(r) => r,
-                    Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => return,
-                },
+                Err(TryRecvError::Empty) => {
+                    match visible.recv_timeout(std::time::Duration::from_millis(200)) {
+                        Ok(r) => r,
+                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                    }
+                }
             },
         };
         let icon = load(&dir, &r);

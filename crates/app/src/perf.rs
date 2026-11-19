@@ -37,14 +37,23 @@ struct State {
     enabled: bool,
 }
 
-static STATE: Mutex<State> =
-    Mutex::new(State { pending: None, samples: BTreeMap::new(), out: None, mode: "stock", presents: 0, path: std::path::PathBuf::new(), enabled: false });
+static STATE: Mutex<State> = Mutex::new(State {
+    pending: None,
+    samples: BTreeMap::new(),
+    out: None,
+    mode: "stock",
+    presents: 0,
+    path: std::path::PathBuf::new(),
+    enabled: false,
+});
 
 pub fn init(path: &Path, mode: &'static str) {
     let mut s = STATE.lock().unwrap();
     s.path = path.to_path_buf();
     s.enabled = true;
-    s.out = File::create(path).map_err(|e| log::warn!("perf file {}: {e}", path.display())).ok();
+    s.out = File::create(path)
+        .map_err(|e| log::warn!("perf file {}: {e}", path.display()))
+        .ok();
     s.mode = mode;
     gpui::PRESENT_HOOK.set(on_present).ok();
 }
@@ -53,7 +62,11 @@ pub fn init(path: &Path, mode: &'static str) {
 pub fn show_started(at: Instant) {
     let mut s = STATE.lock().unwrap();
     if s.enabled {
-        s.pending = Some(Pending { kind: Kind::Show, started: at, results: None });
+        s.pending = Some(Pending {
+            kind: Kind::Show,
+            started: at,
+            results: None,
+        });
     }
 }
 
@@ -62,7 +75,11 @@ pub fn show_started(at: Instant) {
 pub fn input_started() {
     let mut s = STATE.lock().unwrap();
     if s.enabled && s.pending.is_none() {
-        s.pending = Some(Pending { kind: Kind::Key, started: Instant::now(), results: None });
+        s.pending = Some(Pending {
+            kind: Kind::Key,
+            started: Instant::now(),
+            results: None,
+        });
     }
 }
 
@@ -83,7 +100,10 @@ pub fn presents() -> u64 {
 fn on_present(drawn: std::time::Duration, presented: std::time::Duration) {
     let mut s = STATE.lock().unwrap();
     s.presents += 1;
-    let (d, p) = (drawn.as_secs_f64() * 1000.0, presented.as_secs_f64() * 1000.0);
+    let (d, p) = (
+        drawn.as_secs_f64() * 1000.0,
+        presented.as_secs_f64() * 1000.0,
+    );
     s.samples.entry("frame_draw").or_default().push(d);
     s.samples.entry("frame_draw_present").or_default().push(p);
     // A frame presented before results were ready (a cursor blink, say) isn't
@@ -98,14 +118,26 @@ fn on_present(drawn: std::time::Duration, presented: std::time::Duration) {
     s.pending = None;
     write_line(&mut s, name, total, Some(results));
     s.samples.entry(name).or_default().push(total);
-    s.samples.entry(if name == "show_to_present" { "show_results" } else { "key_results" }).or_default().push(results);
+    s.samples
+        .entry(if name == "show_to_present" {
+            "show_results"
+        } else {
+            "key_results"
+        })
+        .or_default()
+        .push(results);
 }
 
 fn write_line(s: &mut State, name: &str, value: f64, results: Option<f64>) {
     let mode = s.mode;
     if let Some(out) = s.out.as_mut() {
-        let results = results.map(|r| format!(",\"results_ms\":{r:.3}")).unwrap_or_default();
-        let _ = writeln!(out, "{{\"metric\":\"{name}\",\"mode\":\"{mode}\",\"ms\":{value:.3}{results}}}");
+        let results = results
+            .map(|r| format!(",\"results_ms\":{r:.3}"))
+            .unwrap_or_default();
+        let _ = writeln!(
+            out,
+            "{{\"metric\":\"{name}\",\"mode\":\"{mode}\",\"ms\":{value:.3}{results}}}"
+        );
     }
 }
 

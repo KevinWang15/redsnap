@@ -7,7 +7,6 @@
 use std::cmp::Reverse;
 use std::sync::Arc;
 
-
 use nucleo_matcher::Matcher;
 
 use crate::item::{Item, ProviderId};
@@ -37,15 +36,33 @@ pub struct Candidate {
 
 impl Candidate {
     pub fn normal(item: Arc<Item>, m: Match) -> Self {
-        Candidate { item, m, slot: Slot::Normal }
+        Candidate {
+            item,
+            m,
+            slot: Slot::Normal,
+        }
     }
 
     pub fn top(item: Item) -> Self {
-        Candidate { item: Arc::new(item), m: Match { class: MatchClass::Exact, score: u32::MAX }, slot: Slot::Top }
+        Candidate {
+            item: Arc::new(item),
+            m: Match {
+                class: MatchClass::Exact,
+                score: u32::MAX,
+            },
+            slot: Slot::Top,
+        }
     }
 
     pub fn fallback(item: Item) -> Self {
-        Candidate { item: Arc::new(item), m: Match { class: MatchClass::Fuzzy, score: 0 }, slot: Slot::Fallback }
+        Candidate {
+            item: Arc::new(item),
+            m: Match {
+                class: MatchClass::Fuzzy,
+                score: 0,
+            },
+            slot: Slot::Fallback,
+        }
     }
 }
 
@@ -79,7 +96,14 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(providers: Vec<Box<dyn Provider>>, keywords: Keywords) -> Self {
-        Engine { providers, keywords, cx: SearchContext { matcher: new_matcher(), now: 0 } }
+        Engine {
+            providers,
+            keywords,
+            cx: SearchContext {
+                matcher: new_matcher(),
+                now: 0,
+            },
+        }
     }
 
     pub fn keywords(&self) -> &Keywords {
@@ -87,7 +111,13 @@ impl Engine {
     }
 
     /// The best `limit` results for `input`, best first.
-    pub fn search(&mut self, input: &str, usage: &Arc<Usage>, now: i64, limit: usize) -> (Query, Vec<Hit>) {
+    pub fn search(
+        &mut self,
+        input: &str,
+        usage: &Arc<Usage>,
+        now: i64,
+        limit: usize,
+    ) -> (Query, Vec<Hit>) {
         let q = Query::parse(input, &self.keywords);
         self.cx.now = now;
         let mut all = Vec::new();
@@ -118,8 +148,16 @@ pub fn rank(mut all: Vec<Candidate>, q: &Query, usage: &Usage, now: i64, limit: 
         .into_iter()
         .map(|c| {
             let learn = c.item.learnable;
-            let boost = if learn { usage.query_boost(folded, &c.item.id, now) } else { 0 };
-            let global = if learn { usage.global(&c.item.id, now) } else { 0 };
+            let boost = if learn {
+                usage.query_boost(folded, &c.item.id, now)
+            } else {
+                0
+            };
+            let global = if learn {
+                usage.global(&c.item.id, now)
+            } else {
+                0
+            };
             let key = Key {
                 slot: c.slot,
                 fuzzy: c.m.class == MatchClass::Fuzzy,
@@ -131,7 +169,9 @@ pub fn rank(mut all: Vec<Candidate>, q: &Query, usage: &Usage, now: i64, limit: 
             (key, c)
         })
         .collect();
-    let cmp = |a: &(Key, Candidate), b: &(Key, Candidate)| a.0.cmp(&b.0).then_with(|| a.1.item.id.cmp(&b.1.item.id));
+    let cmp = |a: &(Key, Candidate), b: &(Key, Candidate)| {
+        a.0.cmp(&b.0).then_with(|| a.1.item.id.cmp(&b.1.item.id))
+    };
     if limit < keyed.len() {
         if limit == 0 {
             return Vec::new();
@@ -146,7 +186,10 @@ pub fn rank(mut all: Vec<Candidate>, q: &Query, usage: &Usage, now: i64, limit: 
     keyed
         .into_iter()
         .filter(|(_, c)| seen.insert(c.item.id.clone()))
-        .map(|(_, c)| Hit { class: c.m.class, item: c.item })
+        .map(|(_, c)| Hit {
+            class: c.m.class,
+            item: c.item,
+        })
         .collect()
 }
 

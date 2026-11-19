@@ -12,8 +12,9 @@ use std::time::Duration;
 use gpui::components::*;
 use gpui::icons::{Icon, IconSize, LucideIcon};
 use gpui::{
-    AnyElement, AnyWindowHandle, App, AppContext, Context, Entity, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window, WindowControlArea, div,
+    AnyElement, AnyWindowHandle, App, AppContext, Context, Entity, FocusHandle, Focusable,
+    FontWeight, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement, Render,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, WindowControlArea, div,
     prelude::FluentBuilder, px, rgb,
 };
 use redsnap_core::config::Config;
@@ -124,9 +125,14 @@ impl SettingsView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let recorder_focus = cx.focus_handle();
         let subs = vec![
-            cx.on_blur(&recorder_focus, window, |this, _, cx| this.stop_recording(cx)),
+            cx.on_blur(&recorder_focus, window, |this, _, cx| {
+                this.stop_recording(cx)
+            }),
             cx.on_release(|_, cx| {
-                let _ = cx.global::<crate::app::Events>().0.unbounded_send(crate::app::Event::SettingsClosed);
+                let _ = cx
+                    .global::<crate::app::Events>()
+                    .0
+                    .unbounded_send(crate::app::Event::SettingsClosed);
             }),
         ];
         let mut this = SettingsView {
@@ -151,8 +157,12 @@ impl SettingsView {
             Ok(v) => this.set_snapshot(&v, window, cx),
             Err(e) => this.load_error = Some(e),
         });
-        this.call("app.info", json!({}), cx, |this, r, _, _| this.info = r.ok());
-        this.call("apps.stats", json!({}), cx, |this, r, _, _| this.stats = r.ok());
+        this.call("app.info", json!({}), cx, |this, r, _, _| {
+            this.info = r.ok()
+        });
+        this.call("apps.stats", json!({}), cx, |this, r, _, _| {
+            this.stats = r.ok()
+        });
         this.refresh_clip_stats(cx);
         this
     }
@@ -168,7 +178,9 @@ impl SettingsView {
         let rx = request(cx, method, params);
         let window = self.window;
         cx.spawn(async move |this, cx| {
-            let r = rx.await.unwrap_or_else(|_| Err("RedSnap didn't answer".into()));
+            let r = rx
+                .await
+                .unwrap_or_else(|_| Err("RedSnap didn't answer".into()));
             window
                 .update(cx, |_, window, cx| {
                     this.update(cx, |this, cx| {
@@ -182,7 +194,9 @@ impl SettingsView {
     }
 
     pub fn refresh_clip_stats(&mut self, cx: &mut Context<Self>) {
-        self.call("clipboard.stats", json!({}), cx, |this, r, _, _| this.clip_stats = r.ok());
+        self.call("clipboard.stats", json!({}), cx, |this, r, _, _| {
+            this.clip_stats = r.ok()
+        });
     }
 
     fn set_snapshot(&mut self, v: &Value, window: &mut Window, cx: &mut Context<Self>) {
@@ -206,7 +220,9 @@ impl SettingsView {
         for (key, f) in &self.fields {
             match (f.get)(&snap.config) {
                 None => gone.push(key.clone()),
-                Some(want) if !f.focused(window, cx) && f.value(cx) != want => f.set_value(want, cx),
+                Some(want) if !f.focused(window, cx) && f.value(cx) != want => {
+                    f.set_value(want, cx)
+                }
                 Some(_) => {}
             }
         }
@@ -216,7 +232,13 @@ impl SettingsView {
     }
 
     /// An event from the app loop: a change made elsewhere.
-    pub fn pushed(&mut self, event: &str, params: Value, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn pushed(
+        &mut self,
+        event: &str,
+        params: Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match event {
             "config.changed" => self.set_snapshot(&params, window, cx),
             "apps.stats" => self.stats = Some(params),
@@ -226,13 +248,18 @@ impl SettingsView {
     }
 
     pub fn notify(&mut self, error: bool, text: impl Into<SharedString>, cx: &mut Context<Self>) {
-        self.notice = Some(Notice { error, text: text.into() });
+        self.notice = Some(Notice {
+            error,
+            text: text.into(),
+        });
         self.notice_gen += 1;
         if !error {
             // "Saved" and the like go away by themselves; errors stay until closed.
             let generation = self.notice_gen;
             cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(Duration::from_millis(2500)).await;
+                cx.background_executor()
+                    .timer(Duration::from_millis(2500))
+                    .await;
                 this.update(cx, |this, cx| {
                     if this.notice_gen == generation {
                         this.notice = None;
@@ -256,22 +283,30 @@ impl SettingsView {
             return;
         }
         let params = json!({ "config": next, "revision": snap.revision });
-        self.call("config.save", params, cx, move |this, r, window, cx| match r {
-            Ok(v) => {
-                let revision = v["revision"].as_u64().unwrap_or(0);
-                this.snap = Some(Snapshot { config: next, revision });
-                this.sync_fields(window, cx);
-                this.notify(false, "Saved", cx);
-            }
-            Err(e) => {
-                this.notify(true, e, cx);
-                this.call("config.get", json!({}), cx, |this, r, window, cx| {
-                    if let Ok(v) = r {
-                        this.set_snapshot(&v, window, cx);
-                    }
-                });
-            }
-        });
+        self.call(
+            "config.save",
+            params,
+            cx,
+            move |this, r, window, cx| match r {
+                Ok(v) => {
+                    let revision = v["revision"].as_u64().unwrap_or(0);
+                    this.snap = Some(Snapshot {
+                        config: next,
+                        revision,
+                    });
+                    this.sync_fields(window, cx);
+                    this.notify(false, "Saved", cx);
+                }
+                Err(e) => {
+                    this.notify(true, e, cx);
+                    this.call("config.get", json!({}), cx, |this, r, window, cx| {
+                        if let Ok(v) = r {
+                            this.set_snapshot(&v, window, cx);
+                        }
+                    });
+                }
+            },
+        );
     }
 
     /// A one-line field bound to the config, made on first use.
@@ -283,12 +318,24 @@ impl SettingsView {
         get: impl Fn(&Config) -> Option<String> + 'static,
         set: impl Fn(&mut Config, &str) -> Result<(), String> + 'static,
     ) -> Entity<InputState> {
-        if let Some(Field { state: FieldState::Line(s), .. }) = self.fields.get(key) {
+        if let Some(Field {
+            state: FieldState::Line(s),
+            ..
+        }) = self.fields.get(key)
+        {
             return s.clone();
         }
-        let initial = self.snap.as_ref().and_then(|s| get(&s.config)).unwrap_or_default();
+        let initial = self
+            .snap
+            .as_ref()
+            .and_then(|s| get(&s.config))
+            .unwrap_or_default();
         let placeholder = placeholder.to_string();
-        let state = cx.new(|cx| InputState::new(cx).default_value(initial).placeholder(placeholder));
+        let state = cx.new(|cx| {
+            InputState::new(cx)
+                .default_value(initial)
+                .placeholder(placeholder)
+        });
         let set: Set = Rc::new(set);
         let get: Get = Rc::new(get);
         let sub = {
@@ -300,7 +347,14 @@ impl SettingsView {
                 }
             })
         };
-        self.fields.insert(key.to_string(), Field { state: FieldState::Line(state.clone()), get, _sub: sub });
+        self.fields.insert(
+            key.to_string(),
+            Field {
+                state: FieldState::Line(state.clone()),
+                get,
+                _sub: sub,
+            },
+        );
         state
     }
 
@@ -313,12 +367,25 @@ impl SettingsView {
         get: impl Fn(&Config) -> Option<String> + 'static,
         set: impl Fn(&mut Config, &str) -> Result<(), String> + 'static,
     ) -> Entity<TextBoxState> {
-        if let Some(Field { state: FieldState::Area(s), .. }) = self.fields.get(key) {
+        if let Some(Field {
+            state: FieldState::Area(s),
+            ..
+        }) = self.fields.get(key)
+        {
             return s.clone();
         }
-        let initial = self.snap.as_ref().and_then(|s| get(&s.config)).unwrap_or_default();
+        let initial = self
+            .snap
+            .as_ref()
+            .and_then(|s| get(&s.config))
+            .unwrap_or_default();
         let placeholder = placeholder.to_string();
-        let state = cx.new(|cx| TextBoxState::new(cx).default_value(initial).placeholder(placeholder).rows(4));
+        let state = cx.new(|cx| {
+            TextBoxState::new(cx)
+                .default_value(initial)
+                .placeholder(placeholder)
+                .rows(4)
+        });
         let set: Set = Rc::new(set);
         let get: Get = Rc::new(get);
         let sub = {
@@ -330,7 +397,14 @@ impl SettingsView {
                 }
             })
         };
-        self.fields.insert(key.to_string(), Field { state: FieldState::Area(state.clone()), get, _sub: sub });
+        self.fields.insert(
+            key.to_string(),
+            Field {
+                state: FieldState::Area(state.clone()),
+                get,
+                _sub: sub,
+            },
+        );
         state
     }
 
@@ -360,18 +434,28 @@ impl SettingsView {
         }
         let placeholder = placeholder.to_string();
         let state = cx.new(|cx| InputState::new(cx).placeholder(placeholder));
-        let sub = cx.subscribe(&state, move |this, state, e: &InputEvent, cx| on(this, &state, e, cx));
+        let sub = cx.subscribe(&state, move |this, state, e: &InputEvent, cx| {
+            on(this, &state, e, cx)
+        });
         self.inputs.insert(key.to_string(), (state.clone(), sub));
         state
     }
 
     pub fn plain_value(&self, key: &str, cx: &App) -> String {
-        self.inputs.get(key).map(|(s, _)| s.read(cx).value().trim().to_string()).unwrap_or_default()
+        self.inputs
+            .get(key)
+            .map(|(s, _)| s.read(cx).value().trim().to_string())
+            .unwrap_or_default()
     }
 
     // ----- the shortcut recorder --------------------------------------------
 
-    pub fn start_recording(&mut self, which: Shortcut, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn start_recording(
+        &mut self,
+        which: Shortcut,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.recording == Some(which) {
             self.stop_recording(cx);
             return;
@@ -401,23 +485,38 @@ impl SettingsView {
             self.stop_recording(cx);
             return;
         }
-        let Some(spec) = spec_from_keystroke(k) else { return };
+        let Some(spec) = spec_from_keystroke(k) else {
+            return;
+        };
         self.stop_recording(cx);
         // Registered for real first, so a taken shortcut is refused here.
-        self.call("hotkey.test", json!({ "shortcut": spec }), cx, move |this, r, _, cx| match r {
-            Ok(_) => this.save(cx, move |c| match which {
-                Shortcut::Launcher => c.hotkey = spec,
-                Shortcut::Clipboard => c.clipboard.hotkey = spec,
-            }),
-            Err(e) => this.recorder_error = Some((which, e)),
-        });
+        self.call(
+            "hotkey.test",
+            json!({ "shortcut": spec }),
+            cx,
+            move |this, r, _, cx| match r {
+                Ok(_) => this.save(cx, move |c| match which {
+                    Shortcut::Launcher => c.hotkey = spec,
+                    Shortcut::Clipboard => c.clipboard.hotkey = spec,
+                }),
+                Err(e) => this.recorder_error = Some((which, e)),
+            },
+        );
     }
 
     pub fn recorder(&self, which: Shortcut, value: &str, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let recording = self.recording == Some(which);
-        let error = self.recorder_error.as_ref().filter(|(w, _)| *w == which).map(|(_, e)| e.clone());
-        let label: SharedString = if recording { "Press the new shortcut…".into() } else { display_shortcut(value).into() };
+        let error = self
+            .recorder_error
+            .as_ref()
+            .filter(|(w, _)| *w == which)
+            .map(|(_, e)| e.clone());
+        let label: SharedString = if recording {
+            "Press the new shortcut…".into()
+        } else {
+            display_shortcut(value).into()
+        };
         let id = match which {
             Shortcut::Launcher => "rec-launcher",
             Shortcut::Clipboard => "rec-clipboard",
@@ -445,15 +544,29 @@ impl SettingsView {
                     .cursor_pointer()
                     .map(|d| {
                         if recording {
-                            d.border_color(rgb(RED)).bg(theme.primary_soft).text_color(theme.primary_soft_foreground)
+                            d.border_color(rgb(RED))
+                                .bg(theme.primary_soft)
+                                .text_color(theme.primary_soft_foreground)
                         } else {
-                            d.border_color(theme.input_border).bg(theme.input_bg).hover(|s| s.border_color(theme.input_border_hover))
+                            d.border_color(theme.input_border)
+                                .bg(theme.input_bg)
+                                .hover(|s| s.border_color(theme.input_border_hover))
                         }
                     })
-                    .on_click(cx.listener(move |this, _, window, cx| this.start_recording(which, window, cx)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.start_recording(which, window, cx)
+                    }))
                     .child(label),
             )
-            .when_some(error, |d, e| d.child(div().max_w(px(300.)).text_size(px(12.)).text_color(theme.destructive_hover).child(e)))
+            .when_some(error, |d, e| {
+                d.child(
+                    div()
+                        .max_w(px(300.))
+                        .text_size(px(12.))
+                        .text_color(theme.destructive_hover)
+                        .child(e),
+                )
+            })
             .into_any_element()
     }
 
@@ -468,8 +581,16 @@ impl SettingsView {
     ) -> AnyElement {
         let armed = self.confirming == Some(key);
         button(key)
-            .label(if armed { confirm.to_string() } else { label.to_string() })
-            .variant(if armed { ButtonVariant::Destructive } else { ButtonVariant::Secondary })
+            .label(if armed {
+                confirm.to_string()
+            } else {
+                label.to_string()
+            })
+            .variant(if armed {
+                ButtonVariant::Destructive
+            } else {
+                ButtonVariant::Secondary
+            })
             .size(ComponentSize::Sm)
             .on_click(cx.listener(move |this, _, _, cx| {
                 if this.confirming == Some(key) {
@@ -512,7 +633,13 @@ impl SettingsView {
                 .justify_center()
                 .text_color(theme.muted_foreground)
                 .window_control_area(area)
-                .map(|d| if close { d.hover(|s| s.bg(rgb(0xE81123)).text_color(gpui::white())) } else { d.hover(|s| s.bg(theme.surface_hover)) })
+                .map(|d| {
+                    if close {
+                        d.hover(|s| s.bg(rgb(0xE81123)).text_color(gpui::white()))
+                    } else {
+                        d.hover(|s| s.bg(theme.surface_hover))
+                    }
+                })
                 .child(Icon::new(icon).size(IconSize::Sm))
         };
         let maximized = window.is_maximized();
@@ -546,23 +673,45 @@ impl SettingsView {
                         })
                     })
                     .when(!mac, |d| d.child(super::pages::mark(18.)))
-                    .child(div().text_size(px(12.5)).text_color(theme.muted_foreground).child("RedSnap Settings")),
+                    .child(
+                        div()
+                            .text_size(px(12.5))
+                            .text_color(theme.muted_foreground)
+                            .child("RedSnap Settings"),
+                    ),
             )
             .when(!mac, |d| {
                 d.child(
                     div()
                         .h_full()
                         .flex()
-                        .child(control("min", LucideIcon::Minus, WindowControlArea::Min, false).when(!os_handles, |d| {
-                            d.on_click(|_, window, _| window.minimize_window())
-                        }))
                         .child(
-                            control("max", if maximized { LucideIcon::Copy } else { LucideIcon::Square }, WindowControlArea::Max, false)
-                                .when(!os_handles, |d| d.on_click(|_, window, _| window.zoom_window())),
+                            control("min", LucideIcon::Minus, WindowControlArea::Min, false)
+                                .when(!os_handles, |d| {
+                                    d.on_click(|_, window, _| window.minimize_window())
+                                }),
                         )
-                        .child(control("close", LucideIcon::X, WindowControlArea::Close, true).when(!os_handles, |d| {
-                            d.on_click(|_, window, _| window.remove_window())
-                        })),
+                        .child(
+                            control(
+                                "max",
+                                if maximized {
+                                    LucideIcon::Copy
+                                } else {
+                                    LucideIcon::Square
+                                },
+                                WindowControlArea::Max,
+                                false,
+                            )
+                            .when(!os_handles, |d| {
+                                d.on_click(|_, window, _| window.zoom_window())
+                            }),
+                        )
+                        .child(
+                            control("close", LucideIcon::X, WindowControlArea::Close, true)
+                                .when(!os_handles, |d| {
+                                    d.on_click(|_, window, _| window.remove_window())
+                                }),
+                        ),
                 )
             })
     }
@@ -574,18 +723,29 @@ impl SettingsView {
             .gap(px(10.))
             .px(px(4.))
             .child(super::pages::mark(26.))
-            .child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child("RedSnap"));
+            .child(
+                div()
+                    .text_size(px(15.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("RedSnap"),
+            );
         let mut group = SidebarGroup::new(None::<SharedString>);
         for (i, (page, label, icon)) in PAGES.into_iter().enumerate() {
             group = group.child(
-                SidebarItem::new(("page", i), label).icon(icon).active(self.page == page).on_click(cx.listener(move |this, _, _, cx| {
-                    this.page = page;
-                    this.confirming = None;
-                    cx.notify();
-                })),
+                SidebarItem::new(("page", i), label)
+                    .icon(icon)
+                    .active(self.page == page)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.page = page;
+                        this.confirming = None;
+                        cx.notify();
+                    })),
             );
         }
-        Sidebar::new("pages").width(px(210.)).header(header).child(group)
+        Sidebar::new("pages")
+            .width(px(210.))
+            .header(header)
+            .child(group)
     }
 
     fn notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -607,9 +767,13 @@ impl SettingsView {
                 .text_size(px(13.))
                 .map(|d| {
                     if n.error {
-                        d.border_color(rgb(RED).into_hsla_opacity(0.4)).bg(rgb(0x2A1219)).text_color(theme.foreground)
+                        d.border_color(rgb(RED).into_hsla_opacity(0.4))
+                            .bg(rgb(0x2A1219))
+                            .text_color(theme.foreground)
                     } else {
-                        d.border_color(theme.border).bg(theme.surface_muted).text_color(theme.muted_foreground)
+                        d.border_color(theme.border)
+                            .bg(theme.surface_muted)
+                            .text_color(theme.muted_foreground)
                     }
                 })
                 .child(div().flex_1().min_w_0().child(n.text.clone()))
@@ -655,7 +819,23 @@ impl Render for SettingsView {
                 // The window's own fill is under it already.
                 .bg(gpui::transparent_black())
                 .sidebar(self.sidebar(cx))
-                .child(div().w_full().flex().justify_center().px(px(32.)).py(px(28.)).child(div().w_full().max_w(px(760.)).flex().flex_col().gap(px(28.)).child(page)))
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .justify_center()
+                        .px(px(32.))
+                        .py(px(28.))
+                        .child(
+                            div()
+                                .w_full()
+                                .max_w(px(760.))
+                                .flex()
+                                .flex_col()
+                                .gap(px(28.))
+                                .child(page),
+                        ),
+                )
                 .into_any_element()
         };
         div()

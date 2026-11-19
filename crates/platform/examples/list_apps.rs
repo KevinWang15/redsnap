@@ -12,8 +12,13 @@ fn main() -> anyhow::Result<()> {
             icons += 1;
         }
         if all || i < 25 {
-            let size = icon.map(|(w, h, _)| format!("{w}x{h}")).unwrap_or_else(|| "-".into());
-            println!("{:<40} {:<8} aliases {:?}  [{}]", a.name, size, a.aliases, a.key);
+            let size = icon
+                .map(|(w, h, _)| format!("{w}x{h}"))
+                .unwrap_or_else(|| "-".into());
+            println!(
+                "{:<40} {:<8} aliases {:?}  [{}]",
+                a.name, size, a.aliases, a.key
+            );
         }
     }
     println!(

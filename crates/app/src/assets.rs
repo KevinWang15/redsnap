@@ -31,25 +31,70 @@ pub mod icon {
 }
 
 const FILES: &[(&str, &[u8])] = &[
-    ("icons/arrow-right-to-line.svg", include_bytes!("../assets/icons/arrow-right-to-line.svg")),
-    ("icons/arrow-up-down.svg", include_bytes!("../assets/icons/arrow-up-down.svg")),
+    (
+        "icons/arrow-right-to-line.svg",
+        include_bytes!("../assets/icons/arrow-right-to-line.svg"),
+    ),
+    (
+        "icons/arrow-up-down.svg",
+        include_bytes!("../assets/icons/arrow-up-down.svg"),
+    ),
     ("icons/ban.svg", include_bytes!("../assets/icons/ban.svg")),
-    ("icons/calculator.svg", include_bytes!("../assets/icons/calculator.svg")),
-    ("icons/corner-down-left.svg", include_bytes!("../assets/icons/corner-down-left.svg")),
-    ("icons/external-link.svg", include_bytes!("../assets/icons/external-link.svg")),
+    (
+        "icons/calculator.svg",
+        include_bytes!("../assets/icons/calculator.svg"),
+    ),
+    (
+        "icons/corner-down-left.svg",
+        include_bytes!("../assets/icons/corner-down-left.svg"),
+    ),
+    (
+        "icons/external-link.svg",
+        include_bytes!("../assets/icons/external-link.svg"),
+    ),
     ("icons/file.svg", include_bytes!("../assets/icons/file.svg")),
-    ("icons/files.svg", include_bytes!("../assets/icons/files.svg")),
-    ("icons/folder.svg", include_bytes!("../assets/icons/folder.svg")),
-    ("icons/image.svg", include_bytes!("../assets/icons/image.svg")),
+    (
+        "icons/files.svg",
+        include_bytes!("../assets/icons/files.svg"),
+    ),
+    (
+        "icons/folder.svg",
+        include_bytes!("../assets/icons/folder.svg"),
+    ),
+    (
+        "icons/image.svg",
+        include_bytes!("../assets/icons/image.svg"),
+    ),
     ("icons/info.svg", include_bytes!("../assets/icons/info.svg")),
-    ("icons/mark-brackets.svg", include_bytes!("../assets/icons/mark-brackets.svg")),
-    ("icons/mark-square.svg", include_bytes!("../assets/icons/mark-square.svg")),
+    (
+        "icons/mark-brackets.svg",
+        include_bytes!("../assets/icons/mark-brackets.svg"),
+    ),
+    (
+        "icons/mark-square.svg",
+        include_bytes!("../assets/icons/mark-square.svg"),
+    ),
     ("icons/pin.svg", include_bytes!("../assets/icons/pin.svg")),
-    ("icons/power.svg", include_bytes!("../assets/icons/power.svg")),
-    ("icons/refresh-cw.svg", include_bytes!("../assets/icons/refresh-cw.svg")),
-    ("icons/search.svg", include_bytes!("../assets/icons/search.svg")),
-    ("icons/settings.svg", include_bytes!("../assets/icons/settings.svg")),
-    ("icons/square-pen.svg", include_bytes!("../assets/icons/square-pen.svg")),
+    (
+        "icons/power.svg",
+        include_bytes!("../assets/icons/power.svg"),
+    ),
+    (
+        "icons/refresh-cw.svg",
+        include_bytes!("../assets/icons/refresh-cw.svg"),
+    ),
+    (
+        "icons/search.svg",
+        include_bytes!("../assets/icons/search.svg"),
+    ),
+    (
+        "icons/settings.svg",
+        include_bytes!("../assets/icons/settings.svg"),
+    ),
+    (
+        "icons/square-pen.svg",
+        include_bytes!("../assets/icons/square-pen.svg"),
+    ),
     ("icons/type.svg", include_bytes!("../assets/icons/type.svg")),
     ("icons/x.svg", include_bytes!("../assets/icons/x.svg")),
 ];
@@ -58,10 +103,17 @@ pub struct Assets;
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
-        Ok(FILES.iter().find(|(p, _)| *p == path).map(|(_, bytes)| Cow::Borrowed(*bytes)))
+        Ok(FILES
+            .iter()
+            .find(|(p, _)| *p == path)
+            .map(|(_, bytes)| Cow::Borrowed(*bytes)))
     }
 
     fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
-        Ok(FILES.iter().filter(|(p, _)| p.starts_with(path)).map(|(p, _)| SharedString::from(*p)).collect())
+        Ok(FILES
+            .iter()
+            .filter(|(p, _)| p.starts_with(path))
+            .map(|(p, _)| SharedString::from(*p))
+            .collect())
     }
 }

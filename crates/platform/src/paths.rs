@@ -20,11 +20,21 @@ impl Paths {
     /// (tests and demo runs, so they never touch real settings).
     pub fn resolve(root: Option<PathBuf>) -> Result<Self> {
         let paths = match root {
-            Some(r) => Paths { config: r.join("config"), data: r.join("data"), cache: r.join("cache") },
+            Some(r) => Paths {
+                config: r.join("config"),
+                data: r.join("data"),
+                cache: r.join("cache"),
+            },
             None => Paths {
-                config: dirs::config_dir().context("no config directory")?.join("redsnap"),
-                data: dirs::data_local_dir().context("no data directory")?.join("redsnap"),
-                cache: dirs::cache_dir().context("no cache directory")?.join("redsnap"),
+                config: dirs::config_dir()
+                    .context("no config directory")?
+                    .join("redsnap"),
+                data: dirs::data_local_dir()
+                    .context("no data directory")?
+                    .join("redsnap"),
+                cache: dirs::cache_dir()
+                    .context("no cache directory")?
+                    .join("redsnap"),
             },
         };
         for dir in [&paths.config, &paths.data, &paths.cache, &paths.logs()] {

@@ -15,8 +15,10 @@ enum Tok {
     Ident(&'static str),
 }
 
-const FUNCS: &[&str] =
-    &["sqrt", "abs", "round", "floor", "ceil", "sin", "cos", "tan", "asin", "acos", "atan", "ln", "log", "log2", "exp"];
+const FUNCS: &[&str] = &[
+    "sqrt", "abs", "round", "floor", "ceil", "sin", "cos", "tan", "asin", "acos", "atan", "ln",
+    "log", "log2", "exp",
+];
 
 fn lex(s: &str) -> Option<Vec<Tok>> {
     let chars: Vec<char> = s.chars().collect();
@@ -35,13 +37,17 @@ fn lex(s: &str) -> Option<Vec<Tok>> {
                         text.push(d);
                     } else if (d == '_' || d == ',')
                         && i + 3 < chars.len() + 1
-                        && chars.get(i + 1..i + 4).is_some_and(|w| w.iter().all(char::is_ascii_digit))
+                        && chars
+                            .get(i + 1..i + 4)
+                            .is_some_and(|w| w.iter().all(char::is_ascii_digit))
                         && !chars.get(i + 4).is_some_and(char::is_ascii_digit)
                     {
                         // Thousands separator: exactly three digits follow.
                     } else if (d == 'e' || d == 'E')
                         && i > start
-                        && chars.get(i + 1).is_some_and(|n| n.is_ascii_digit() || *n == '-' || *n == '+')
+                        && chars
+                            .get(i + 1)
+                            .is_some_and(|n| n.is_ascii_digit() || *n == '-' || *n == '+')
                     {
                         text.push('e');
                         i += 1;
@@ -78,7 +84,10 @@ fn lex(s: &str) -> Option<Vec<Tok>> {
                 while i < chars.len() && (chars[i].is_ascii_alphanumeric()) {
                     i += 1;
                 }
-                let word: String = chars[start..i].iter().collect::<String>().to_ascii_lowercase();
+                let word: String = chars[start..i]
+                    .iter()
+                    .collect::<String>()
+                    .to_ascii_lowercase();
                 let ident = match word.as_str() {
                     "pi" => "pi",
                     "e" => "e",
@@ -223,7 +232,11 @@ pub fn format(v: f64) -> String {
     }
     let digits = 12 - (abs.log10().floor() as i32 + 1);
     let s = format!("{v:.prec$}", prec = digits.clamp(0, 15) as usize);
-    if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s }
+    if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        s
+    }
 }
 
 #[cfg(test)]
@@ -262,7 +275,9 @@ mod tests {
 
     #[test]
     fn not_calculations() {
-        for s in ["", "42", "e", "safari", "1/0", "2 +", "exit", "x", "sqrt", "1 2"] {
+        for s in [
+            "", "42", "e", "safari", "1/0", "2 +", "exit", "x", "sqrt", "1 2",
+        ] {
             assert_eq!(calc(s), None, "{s:?}");
         }
     }

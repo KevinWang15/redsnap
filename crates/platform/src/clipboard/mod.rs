@@ -36,7 +36,9 @@ pub struct ReadLimits {
 }
 
 pub fn now_ms() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 /// Watches the clipboard until dropped.
@@ -50,7 +52,9 @@ impl Watcher {
     /// where capture isn't implemented yet (macOS, Linux: later in M5).
     pub fn start(limits: ReadLimits, on_clip: OnClip) -> anyhow::Result<Option<Watcher>> {
         #[cfg(windows)]
-        return Ok(Some(Watcher { inner: windows::Watcher::start(limits, on_clip)? }));
+        return Ok(Some(Watcher {
+            inner: windows::Watcher::start(limits, on_clip)?,
+        }));
         #[cfg(not(windows))]
         {
             let _ = (limits, on_clip);

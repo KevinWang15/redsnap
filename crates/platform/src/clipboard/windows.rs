@@ -14,14 +14,18 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use redsnap_core::clipboard::{Capture, Content, Skip};
-use windows_sys::Win32::Foundation::{CloseHandle, GlobalFree, HANDLE, HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, GlobalFree, HANDLE, HWND, LPARAM, LRESULT, WPARAM,
+};
 use windows_sys::Win32::System::DataExchange::{
-    AddClipboardFormatListener, CloseClipboard, EmptyClipboard, EnumClipboardFormats, GetClipboardData,
-    GetClipboardFormatNameW, GetClipboardOwner, GetClipboardSequenceNumber, IsClipboardFormatAvailable,
-    OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
+    AddClipboardFormatListener, CloseClipboard, EmptyClipboard, EnumClipboardFormats,
+    GetClipboardData, GetClipboardFormatNameW, GetClipboardOwner, GetClipboardSequenceNumber,
+    IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock};
+use windows_sys::Win32::System::Memory::{
+    GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock,
+};
 use windows_sys::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
@@ -30,8 +34,9 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::Shell::{DragQueryFileW, HDROP};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetForegroundWindow, GetMessageW, GetWindowThreadProcessId,
-    HWND_MESSAGE, IsWindow, MSG, RegisterClassW, SetForegroundWindow, TranslateMessage, WM_CLIPBOARDUPDATE, WNDCLASSW,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetForegroundWindow, GetMessageW,
+    GetWindowThreadProcessId, HWND_MESSAGE, IsWindow, MSG, RegisterClassW, SetForegroundWindow,
+    TranslateMessage, WM_CLIPBOARDUPDATE, WNDCLASSW,
 };
 
 use super::convert::{dib_to_png, dropfiles, png_size, png_to_dib, strip_html};
@@ -103,62 +108,71 @@ impl Watcher {
             bail!("the clipboard watcher is already running");
         }
         let (hwnd_tx, hwnd_rx) = mpsc::channel::<Result<usize, String>>();
-        thread::Builder::new().name("clipboard-listener".into()).spawn(move || unsafe {
-            let class = wide("RedSnapClipboardListener");
-            let wc = WNDCLASSW {
-                lpfnWndProc: Some(wndproc),
-                hInstance: GetModuleHandleW(std::ptr::null()),
-                lpszClassName: class.as_ptr(),
-                ..std::mem::zeroed()
-            };
-            RegisterClassW(&wc);
-            let hwnd = CreateWindowExW(
-                0,
-                class.as_ptr(),
-                class.as_ptr(),
-                0,
-                0,
-                0,
-                0,
-                0,
-                HWND_MESSAGE,
-                std::ptr::null_mut(),
-                wc.hInstance,
-                std::ptr::null(),
-            );
-            if hwnd.is_null() || AddClipboardFormatListener(hwnd) == 0 {
-                let _ = hwnd_tx.send(Err("couldn't listen for clipboard changes".into()));
-                return;
-            }
-            let _ = hwnd_tx.send(Ok(hwnd as usize));
-            let mut msg: MSG = std::mem::zeroed();
-            while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
-                TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
-        })?;
-        let hwnd = hwnd_rx.recv()?.map_err(anyhow::Error::msg)?;
-        thread::Builder::new().name("clipboard-reader".into()).spawn(move || {
-            let formats = Formats::get();
-            let mut last_seq = unsafe { GetClipboardSequenceNumber() };
-            for () in wake_rx {
-                let seq = unsafe { GetClipboardSequenceNumber() };
-                if seq == last_seq {
-                    continue;
+        thread::Builder::new()
+            .name("clipboard-listener".into())
+            .spawn(move || unsafe {
+                let class = wide("RedSnapClipboardListener");
+                let wc = WNDCLASSW {
+                    lpfnWndProc: Some(wndproc),
+                    hInstance: GetModuleHandleW(std::ptr::null()),
+                    lpszClassName: class.as_ptr(),
+                    ..std::mem::zeroed()
+                };
+                RegisterClassW(&wc);
+                let hwnd = CreateWindowExW(
+                    0,
+                    class.as_ptr(),
+                    class.as_ptr(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    HWND_MESSAGE,
+                    std::ptr::null_mut(),
+                    wc.hInstance,
+                    std::ptr::null(),
+                );
+                if hwnd.is_null() || AddClipboardFormatListener(hwnd) == 0 {
+                    let _ = hwnd_tx.send(Err("couldn't listen for clipboard changes".into()));
+                    return;
                 }
-                let at = now_ms();
-                let (source_app, kind) = read(hwnd, &formats, &limits);
-                // Reading can render delayed formats, which bumps the number again.
-                last_seq = unsafe { GetClipboardSequenceNumber() };
-                on_clip(ClipEvent { at, source_app, kind });
-            }
-        })?;
+                let _ = hwnd_tx.send(Ok(hwnd as usize));
+                let mut msg: MSG = std::mem::zeroed();
+                while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            })?;
+        let hwnd = hwnd_rx.recv()?.map_err(anyhow::Error::msg)?;
+        thread::Builder::new()
+            .name("clipboard-reader".into())
+            .spawn(move || {
+                let formats = Formats::get();
+                let mut last_seq = unsafe { GetClipboardSequenceNumber() };
+                for () in wake_rx {
+                    let seq = unsafe { GetClipboardSequenceNumber() };
+                    if seq == last_seq {
+                        continue;
+                    }
+                    let at = now_ms();
+                    let (source_app, kind) = read(hwnd, &formats, &limits);
+                    // Reading can render delayed formats, which bumps the number again.
+                    last_seq = unsafe { GetClipboardSequenceNumber() };
+                    on_clip(ClipEvent {
+                        at,
+                        source_app,
+                        kind,
+                    });
+                }
+            })?;
         Ok(Watcher { hwnd })
     }
 
     pub fn write(&self, content: &Content, id: &str) -> Result<()> {
         let formats = Formats::get();
-        let _open = open(self.hwnd as HWND).ok_or_else(|| anyhow::anyhow!("another app is holding the clipboard"))?;
+        let _open = open(self.hwnd as HWND)
+            .ok_or_else(|| anyhow::anyhow!("another app is holding the clipboard"))?;
         unsafe { EmptyClipboard() };
         match content {
             Content::Text { text, html } => {
@@ -269,10 +283,13 @@ pub(crate) fn exe_name_of_window(hwnd: HWND) -> Option<String> {
         }
         let mut buf = [0u16; 1024];
         let mut len = buf.len() as u32;
-        let ok = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len) != 0;
+        let ok =
+            QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len)
+                != 0;
         CloseHandle(process);
         let path = PathBuf::from(String::from_utf16_lossy(&buf[..len as usize]));
-        ok.then(|| path.file_name().map(|n| n.to_string_lossy().to_string())).flatten()
+        ok.then(|| path.file_name().map(|n| n.to_string_lossy().to_string()))
+            .flatten()
     }
 }
 
@@ -286,22 +303,47 @@ fn format_names() -> String {
         }
         let mut buf = [0u16; 128];
         let n = unsafe { GetClipboardFormatNameW(f, buf.as_mut_ptr(), buf.len() as i32) };
-        names.push(if n > 0 { String::from_utf16_lossy(&buf[..n as usize]) } else { format!("#{f}") });
+        names.push(if n > 0 {
+            String::from_utf16_lossy(&buf[..n as usize])
+        } else {
+            format!("#{f}")
+        });
     }
-    if names.is_empty() { "empty".into() } else { names.join(", ") }
+    if names.is_empty() {
+        "empty".into()
+    } else {
+        names.join(", ")
+    }
 }
 
 fn read(owner: usize, f: &Formats, limits: &ReadLimits) -> (Option<String>, ClipEventKind) {
     let skip = |s| ClipEventKind::Captured(Capture::Skipped(s));
     let Some(_open) = open(owner as HWND) else {
-        return (None, skip(Skip::Unreadable("another app kept the clipboard locked for 5 seconds".into())));
+        return (
+            None,
+            skip(Skip::Unreadable(
+                "another app kept the clipboard locked for 5 seconds".into(),
+            )),
+        );
     };
     let app = owner_app();
     if let Some(Ok(id)) = data(f.own, 256) {
-        return (app, ClipEventKind::OwnWrite(String::from_utf8_lossy(&id).trim_end_matches('\0').to_string()));
+        return (
+            app,
+            ClipEventKind::OwnWrite(
+                String::from_utf8_lossy(&id)
+                    .trim_end_matches('\0')
+                    .to_string(),
+            ),
+        );
     }
     if has(f.exclude) {
-        return (app, skip(Skip::Private("ExcludeClipboardContentFromMonitorProcessing".into())));
+        return (
+            app,
+            skip(Skip::Private(
+                "ExcludeClipboardContentFromMonitorProcessing".into(),
+            )),
+        );
     }
     if has(f.viewer_ignore) {
         return (app, skip(Skip::Private("Clipboard Viewer Ignore".into())));
@@ -310,7 +352,10 @@ fn read(owner: usize, f: &Formats, limits: &ReadLimits) -> (Option<String>, Clip
         && v.len() >= 4
         && u32::from_le_bytes([v[0], v[1], v[2], v[3]]) == 0
     {
-        return (app, skip(Skip::Private("CanIncludeInClipboardHistory = 0".into())));
+        return (
+            app,
+            skip(Skip::Private("CanIncludeInClipboardHistory = 0".into())),
+        );
     }
     (app, ClipEventKind::Captured(read_content(f, limits)))
 }
@@ -320,7 +365,11 @@ fn read_content(f: &Formats, limits: &ReadLimits) -> Capture {
     if has(CF_HDROP) {
         let files = unsafe {
             let h = GetClipboardData(CF_HDROP) as HDROP;
-            let n = if h.is_null() { 0 } else { DragQueryFileW(h, u32::MAX, std::ptr::null_mut(), 0) };
+            let n = if h.is_null() {
+                0
+            } else {
+                DragQueryFileW(h, u32::MAX, std::ptr::null_mut(), 0)
+            };
             (0..n.min(10_000))
                 .filter_map(|i| {
                     let len = DragQueryFileW(h, i, std::ptr::null_mut(), 0);
@@ -335,13 +384,22 @@ fn read_content(f: &Formats, limits: &ReadLimits) -> Capture {
         }
     }
     let html = match data(f.html, limits.max_text_bytes) {
-        Some(Ok(b)) => Some(String::from_utf8_lossy(&b).trim_end_matches('\0').to_string()),
+        Some(Ok(b)) => Some(
+            String::from_utf8_lossy(&b)
+                .trim_end_matches('\0')
+                .to_string(),
+        ),
         _ => None,
     };
     // Text before images: Excel and Word offer a picture of the cells too.
     match data(CF_UNICODETEXT, limits.max_text_bytes * 2) {
         Some(Ok(b)) => {
-            let units: Vec<u16> = b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
+            let units: Vec<u16> = b
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_le_bytes(*c))
+                .collect();
             let end = units.iter().position(|u| *u == 0).unwrap_or(units.len());
             let text = String::from_utf16_lossy(&units[..end]);
             if !text.is_empty() {
@@ -354,7 +412,11 @@ fn read_content(f: &Formats, limits: &ReadLimits) -> Capture {
     match data(f.png, limits.max_image_bytes) {
         Some(Ok(png)) => {
             if let Some((w, h)) = png_size(&png) {
-                return Capture::Content(Content::Image { png, width: w, height: h });
+                return Capture::Content(Content::Image {
+                    png,
+                    width: w,
+                    height: h,
+                });
             }
         }
         Some(Err(bytes)) => return Capture::Skipped(Skip::TooLarge { bytes }),
@@ -374,7 +436,10 @@ fn read_content(f: &Formats, limits: &ReadLimits) -> Capture {
     if let Some(h) = html {
         let text = strip_html(&h);
         if !text.trim().is_empty() {
-            return Capture::Content(Content::Text { text, html: Some(h) });
+            return Capture::Content(Content::Text {
+                text,
+                html: Some(h),
+            });
         }
     }
     Capture::Skipped(Skip::Unsupported(format_names()))
@@ -400,8 +465,15 @@ pub(crate) fn current_text() -> Option<String> {
         return None;
     }
     let _open = Open;
-    let Some(Ok(b)) = data(CF_UNICODETEXT, 4 << 20) else { return None };
-    let units: Vec<u16> = b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
+    let Some(Ok(b)) = data(CF_UNICODETEXT, 4 << 20) else {
+        return None;
+    };
+    let units: Vec<u16> = b
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes(*c))
+        .collect();
     let end = units.iter().position(|u| *u == 0).unwrap_or(units.len());
     Some(String::from_utf16_lossy(&units[..end]))
 }
@@ -436,11 +508,26 @@ pub fn paste_into(target: Target) -> Result<()> {
         let key = |vk: u16, up: bool| INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: INPUT_0 {
-                ki: KEYBDINPUT { wVk: vk, wScan: 0, dwFlags: if up { KEYEVENTF_KEYUP } else { 0 }, time: 0, dwExtraInfo: 0 },
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: if up { KEYEVENTF_KEYUP } else { 0 },
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
             },
         };
-        let inputs = [key(VK_CONTROL, false), key(VK_V, false), key(VK_V, true), key(VK_CONTROL, true)];
-        let sent = SendInput(inputs.len() as u32, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32);
+        let inputs = [
+            key(VK_CONTROL, false),
+            key(VK_V, false),
+            key(VK_V, true),
+            key(VK_CONTROL, true),
+        ];
+        let sent = SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            std::mem::size_of::<INPUT>() as i32,
+        );
         if sent != inputs.len() as u32 {
             bail!("Windows blocked the paste keystroke; the entry is on the clipboard");
         }

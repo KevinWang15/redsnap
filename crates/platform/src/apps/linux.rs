@@ -17,7 +17,10 @@ pub fn roots(extra: &[PathBuf]) -> Vec<PathBuf> {
     let home = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| dirs::home_dir().map(|h| h.join(".local/share")));
-    let dirs = std::env::var("XDG_DATA_DIRS").ok().filter(|s| !s.is_empty()).unwrap_or("/usr/local/share:/usr/share".into());
+    let dirs = std::env::var("XDG_DATA_DIRS")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("/usr/local/share:/usr/share".into());
     home.into_iter()
         .chain(dirs.split(':').map(PathBuf::from))
         .map(|d| d.join("applications"))
@@ -38,7 +41,9 @@ pub fn scan(extra: &[PathBuf]) -> Result<Vec<AppEntry>> {
             if !seen.insert(id.clone()) {
                 continue;
             }
-            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
             if let Some(entry) = parse(&id, &path, &text, &locale, &desktops) {
                 out.push(entry);
             }
@@ -49,10 +54,15 @@ pub fn scan(extra: &[PathBuf]) -> Result<Vec<AppEntry>> {
 
 /// Desktop ids: the path under the root with `/` → `-` (`kde4/foo.desktop` → `kde4-foo.desktop`).
 fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in entries.flatten() {
         if out.len() >= MAX_FILES_PER_ROOT {
-            log::warn!("stopped reading {} at {MAX_FILES_PER_ROOT} files", root.display());
+            log::warn!(
+                "stopped reading {} at {MAX_FILES_PER_ROOT} files",
+                root.display()
+            );
             return;
         }
         let path = e.path();
@@ -68,7 +78,10 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) {
 
 /// `zh_CN.UTF-8@x` → the lookup order `zh_CN`, `zh`.
 fn locale() -> Vec<String> {
-    let raw = ["LC_ALL", "LC_MESSAGES", "LANG"].iter().find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty())).unwrap_or_default();
+    let raw = ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
+        .unwrap_or_default();
     let base = raw.split(['.', '@']).next().unwrap_or("").to_string();
     let mut out = Vec::new();
     if !base.is_empty() && base != "C" && base != "POSIX" {
@@ -85,7 +98,13 @@ fn locale() -> Vec<String> {
 /// Parses the `[Desktop Entry]` group. `None` for entries that shouldn't
 /// appear: not an application, `NoDisplay`, `Hidden`, shown only in other
 /// desktops, or a `TryExec` program that isn't installed.
-pub fn parse(id: &str, path: &Path, text: &str, locale: &[String], desktops: &[&str]) -> Option<AppEntry> {
+pub fn parse(
+    id: &str,
+    path: &Path,
+    text: &str,
+    locale: &[String],
+    desktops: &[&str],
+) -> Option<AppEntry> {
     let mut group = false;
     let mut keys: HashMap<String, String> = HashMap::new();
     for line in text.lines() {
@@ -98,16 +117,29 @@ pub fn parse(id: &str, path: &Path, text: &str, locale: &[String], desktops: &[&
             continue;
         }
         if let Some((k, v)) = line.split_once('=') {
-            keys.entry(k.trim().to_string()).or_insert_with(|| unescape(v.trim()));
+            keys.entry(k.trim().to_string())
+                .or_insert_with(|| unescape(v.trim()));
         }
     }
     let get = |k: &str| keys.get(k).map(String::as_str);
-    let localized = |k: &str| locale.iter().find_map(|l| get(&format!("{k}[{l}]"))).or(get(k));
+    let localized = |k: &str| {
+        locale
+            .iter()
+            .find_map(|l| get(&format!("{k}[{l}]")))
+            .or(get(k))
+    };
     let truthy = |k: &str| get(k).is_some_and(|v| v == "true");
     if get("Type") != Some("Application") || truthy("NoDisplay") || truthy("Hidden") {
         return None;
     }
-    let list = |k: &str| get(k).map(|v| v.split(';').filter(|s| !s.is_empty()).map(str::to_string).collect::<Vec<_>>());
+    let list = |k: &str| {
+        get(k).map(|v| {
+            v.split(';')
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+    };
     if let Some(only) = list("OnlyShowIn")
         && !only.iter().any(|d| desktops.contains(&d.as_str()))
     {
@@ -125,12 +157,19 @@ pub fn parse(id: &str, path: &Path, text: &str, locale: &[String], desktops: &[&
     }
     let name = localized("Name")?.to_string();
     let mut aliases: Vec<String> = Vec::new();
-    for extra in [get("Name"), localized("GenericName"), get("GenericName")].into_iter().flatten() {
+    for extra in [get("Name"), localized("GenericName"), get("GenericName")]
+        .into_iter()
+        .flatten()
+    {
         if extra != name && !aliases.iter().any(|a| a == extra) {
             aliases.push(extra.to_string());
         }
     }
-    for kw in localized("Keywords").into_iter().chain(get("Keywords")).flat_map(|k| k.split(';')) {
+    for kw in localized("Keywords")
+        .into_iter()
+        .chain(get("Keywords"))
+        .flat_map(|k| k.split(';'))
+    {
         if !kw.is_empty() && !aliases.iter().any(|a| a == kw) {
             aliases.push(kw.to_string());
         }
@@ -142,18 +181,33 @@ pub fn parse(id: &str, path: &Path, text: &str, locale: &[String], desktops: &[&
     {
         let stem = stem.to_string_lossy().to_string();
         // Launch wrappers say nothing about the app.
-        const WRAPPERS: &[&str] = &["env", "sh", "bash", "flatpak", "snap", "sudo", "pkexec", "gtk-launch", "xdg-open"];
+        const WRAPPERS: &[&str] = &[
+            "env",
+            "sh",
+            "bash",
+            "flatpak",
+            "snap",
+            "sudo",
+            "pkexec",
+            "gtk-launch",
+            "xdg-open",
+        ];
         if !aliases.contains(&stem) && stem != name && !WRAPPERS.contains(&stem.as_str()) {
             aliases.push(stem);
         }
     }
-    let subtitle = localized("Comment").map(str::to_string).unwrap_or_else(|| path.display().to_string());
+    let subtitle = localized("Comment")
+        .map(str::to_string)
+        .unwrap_or_else(|| path.display().to_string());
     Some(AppEntry {
         key: id.to_string(),
         name,
         aliases,
         subtitle,
-        launch: LaunchTarget::Desktop { id: id.to_string(), file: path.to_path_buf() },
+        launch: LaunchTarget::Desktop {
+            id: id.to_string(),
+            file: path.to_path_buf(),
+        },
         location: Some(path.to_path_buf()),
     })
 }
@@ -188,13 +242,16 @@ fn on_path(program: &str) -> bool {
     if p.is_absolute() {
         return p.exists();
     }
-    std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|d| d.join(program).exists()))
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|d| d.join(program).exists()))
 }
 
 /// The icon named by the desktop file's `Icon` key, from the icon theme (or an
 /// absolute path), as straight BGRA scaled to `px`.
 pub fn icon(target: &LaunchTarget, px: u32) -> Option<(usize, usize, Vec<u8>)> {
-    let LaunchTarget::Desktop { file, .. } = target else { return None };
+    let LaunchTarget::Desktop { file, .. } = target else {
+        return None;
+    };
     let text = std::fs::read_to_string(file).ok()?;
     let name = text
         .lines()
@@ -202,7 +259,11 @@ pub fn icon(target: &LaunchTarget, px: u32) -> Option<(usize, usize, Vec<u8>)> {
         .find_map(|l| l.trim().strip_prefix("Icon="))?
         .trim()
         .to_string();
-    let path = if Path::new(&name).is_absolute() { PathBuf::from(&name) } else { find_icon(&name, px)? };
+    let path = if Path::new(&name).is_absolute() {
+        PathBuf::from(&name)
+    } else {
+        find_icon(&name, px)?
+    };
     super::decode_image(&path, px)
 }
 
@@ -213,7 +274,12 @@ fn find_icon(name: &str, px: u32) -> Option<PathBuf> {
         .map(PathBuf::from)
         .or_else(|| dirs::home_dir().map(|h| h.join(".local/share")))
         .into_iter()
-        .chain(std::env::var("XDG_DATA_DIRS").unwrap_or("/usr/local/share:/usr/share".into()).split(':').map(PathBuf::from))
+        .chain(
+            std::env::var("XDG_DATA_DIRS")
+                .unwrap_or("/usr/local/share:/usr/share".into())
+                .split(':')
+                .map(PathBuf::from),
+        )
         .collect();
     let mut sizes: Vec<u32> = vec![16, 22, 24, 32, 48, 64, 96, 128, 256, 512];
     sizes.sort_by_key(|s| if *s >= px { s - px } else { 10_000 + px - s });
@@ -245,7 +311,13 @@ mod tests {
     use super::*;
 
     fn p(text: &str, desktops: &[&str]) -> Option<AppEntry> {
-        parse("org.example.App.desktop", Path::new("/usr/share/applications/org.example.App.desktop"), text, &["zh_CN".into(), "zh".into()], desktops)
+        parse(
+            "org.example.App.desktop",
+            Path::new("/usr/share/applications/org.example.App.desktop"),
+            text,
+            &["zh_CN".into(), "zh".into()],
+            desktops,
+        )
     }
 
     #[test]
@@ -256,19 +328,54 @@ mod tests {
         )
         .unwrap();
         assert_eq!(e.name, "文件");
-        assert_eq!(e.aliases, ["Files", "File Manager", "folder", "manager", "nautilus"]);
+        assert_eq!(
+            e.aliases,
+            ["Files", "File Manager", "folder", "manager", "nautilus"]
+        );
         assert_eq!(e.subtitle, "Access files");
-        assert!(matches!(e.launch, LaunchTarget::Desktop { ref id, .. } if id == "org.example.App.desktop"));
+        assert!(
+            matches!(e.launch, LaunchTarget::Desktop { ref id, .. } if id == "org.example.App.desktop")
+        );
     }
 
     #[test]
     fn hidden_and_other_desktop_entries_are_skipped() {
-        assert!(p("[Desktop Entry]\nType=Application\nName=X\nNoDisplay=true\n", &[]).is_none());
+        assert!(
+            p(
+                "[Desktop Entry]\nType=Application\nName=X\nNoDisplay=true\n",
+                &[]
+            )
+            .is_none()
+        );
         assert!(p("[Desktop Entry]\nType=Link\nName=X\nURL=https://x\n", &[]).is_none());
-        assert!(p("[Desktop Entry]\nType=Application\nName=X\nOnlyShowIn=KDE;\n", &["GNOME"]).is_none());
-        assert!(p("[Desktop Entry]\nType=Application\nName=X\nOnlyShowIn=KDE;\n", &["KDE"]).is_some());
-        assert!(p("[Desktop Entry]\nType=Application\nName=X\nNotShowIn=GNOME;\n", &["GNOME"]).is_none());
-        assert!(p("[Desktop Entry]\nType=Application\nName=X\nTryExec=/nonexistent/redsnap-test\n", &[]).is_none());
+        assert!(
+            p(
+                "[Desktop Entry]\nType=Application\nName=X\nOnlyShowIn=KDE;\n",
+                &["GNOME"]
+            )
+            .is_none()
+        );
+        assert!(
+            p(
+                "[Desktop Entry]\nType=Application\nName=X\nOnlyShowIn=KDE;\n",
+                &["KDE"]
+            )
+            .is_some()
+        );
+        assert!(
+            p(
+                "[Desktop Entry]\nType=Application\nName=X\nNotShowIn=GNOME;\n",
+                &["GNOME"]
+            )
+            .is_none()
+        );
+        assert!(
+            p(
+                "[Desktop Entry]\nType=Application\nName=X\nTryExec=/nonexistent/redsnap-test\n",
+                &[]
+            )
+            .is_none()
+        );
     }
 
     #[test]

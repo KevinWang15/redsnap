@@ -54,7 +54,9 @@ pub fn run(action: Action, cx: &mut App) {
             match cmd {
                 InternalCommand::OpenSettings => crate::app::open_settings(cx),
                 InternalCommand::ReloadApps => crate::app::reload_apps(cx),
-                InternalCommand::About => background("Opening RedSnap's data folder", move || open::open_path(&paths.data)),
+                InternalCommand::About => background("Opening RedSnap's data folder", move || {
+                    open::open_path(&paths.data)
+                }),
                 InternalCommand::Quit => {
                     crate::perf::write_summary();
                     cx.quit()

@@ -39,14 +39,24 @@ fn sample(x: f32, y: f32, n: f32, tile: bool) -> Option<[f32; 4]> {
         let (inset, arm) = (4.0 / 44.0, 13.0 / 44.0);
         let near = |v: f32| (inset..=inset + arm).contains(&v);
         let far = |v: f32| (1.0 - inset - arm..=1.0 - inset).contains(&v);
-        let edge = |v: f32| (inset..=inset + thick).contains(&v) || (1.0 - inset - thick..=1.0 - inset).contains(&v);
+        let edge = |v: f32| {
+            (inset..=inset + thick).contains(&v) || (1.0 - inset - thick..=1.0 - inset).contains(&v)
+        };
         let in_corner = (near(mx) || far(mx)) && (near(my) || far(my));
         if in_corner && (edge(mx) && (near(my) || far(my)) || edge(my) && (near(mx) || far(mx))) {
             // Only the outer edges of each corner box.
             let left = mx < 0.5;
             let top = my < 0.5;
-            let on_v = if left { mx <= inset + thick } else { mx >= 1.0 - inset - thick };
-            let on_h = if top { my <= inset + thick } else { my >= 1.0 - inset - thick };
+            let on_v = if left {
+                mx <= inset + thick
+            } else {
+                mx >= 1.0 - inset - thick
+            };
+            let on_h = if top {
+                my <= inset + thick
+            } else {
+                my >= 1.0 - inset - thick
+            };
             if on_v || on_h {
                 return Some([255.0, 255.0, 255.0, 0.95]);
             }
@@ -57,7 +67,11 @@ fn sample(x: f32, y: f32, n: f32, tile: bool) -> Option<[f32; 4]> {
         if d <= 0.0 {
             // A subtle top-to-bottom gradient, and a faint light edge.
             let t = y / n;
-            let base = [27.0 + (13.0 - 27.0) * t, 33.0 + (16.0 - 33.0) * t, 48.0 + (23.0 - 48.0) * t];
+            let base = [
+                27.0 + (13.0 - 27.0) * t,
+                33.0 + (16.0 - 33.0) * t,
+                48.0 + (23.0 - 48.0) * t,
+            ];
             if d > -(n * 0.02).max(1.0) {
                 return Some([base[0] + 40.0, base[1] + 40.0, base[2] + 44.0, 1.0]);
             }
@@ -76,14 +90,28 @@ fn render(size: u32, tile: bool) -> Vec<u8> {
             let (mut acc, mut alpha) = ([0.0f32; 3], 0.0f32);
             for sy in 0..4 {
                 for sx in 0..4 {
-                    let (x, y) = (px as f32 + (sx as f32 + 0.5) / 4.0, py as f32 + (sy as f32 + 0.5) / 4.0);
+                    let (x, y) = (
+                        px as f32 + (sx as f32 + 0.5) / 4.0,
+                        py as f32 + (sy as f32 + 0.5) / 4.0,
+                    );
                     if let Some(c) = sample(x, y, n, tile) {
                         // Premultiplied accumulation; a mark sample on the tile
                         // blends with the tile under it.
-                        let under = if c[3] < 1.0 && tile { sample_tile(x, y, n) } else { None };
+                        let under = if c[3] < 1.0 && tile {
+                            sample_tile(x, y, n)
+                        } else {
+                            None
+                        };
                         let a = c[3];
                         let (rgb, total) = match under {
-                            Some(u) => ([c[0] * a + u[0] * (1.0 - a), c[1] * a + u[1] * (1.0 - a), c[2] * a + u[2] * (1.0 - a)], 1.0),
+                            Some(u) => (
+                                [
+                                    c[0] * a + u[0] * (1.0 - a),
+                                    c[1] * a + u[1] * (1.0 - a),
+                                    c[2] * a + u[2] * (1.0 - a),
+                                ],
+                                1.0,
+                            ),
                             None => ([c[0] * a, c[1] * a, c[2] * a], a),
                         };
                         for i in 0..3 {
@@ -108,7 +136,11 @@ fn render(size: u32, tile: bool) -> Vec<u8> {
 fn sample_tile(x: f32, y: f32, n: f32) -> Option<[f32; 3]> {
     if rounded_square(x, y, n / 2.0, n / 2.0 - n * 0.02, n * 0.22) <= 0.0 {
         let t = y / n;
-        Some([27.0 + (13.0 - 27.0) * t, 33.0 + (16.0 - 33.0) * t, 48.0 + (23.0 - 48.0) * t])
+        Some([
+            27.0 + (13.0 - 27.0) * t,
+            33.0 + (16.0 - 33.0) * t,
+            48.0 + (23.0 - 48.0) * t,
+        ])
     } else {
         None
     }

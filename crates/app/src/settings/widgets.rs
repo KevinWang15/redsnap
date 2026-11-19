@@ -29,7 +29,9 @@ pub fn spec_from_keystroke(k: &Keystroke) -> Option<String> {
         "right" => "ArrowRight",
         _ => "",
     };
-    let function_key = key.strip_prefix('f').filter(|n| !n.is_empty() && n.len() <= 2 && n.bytes().all(|b| b.is_ascii_digit()));
+    let function_key = key
+        .strip_prefix('f')
+        .filter(|n| !n.is_empty() && n.len() <= 2 && n.bytes().all(|b| b.is_ascii_digit()));
     let key = if !named.is_empty() {
         named.to_string()
     } else if key.len() == 1 && key.as_bytes()[0].is_ascii_alphanumeric() {
@@ -38,10 +40,15 @@ pub fn spec_from_keystroke(k: &Keystroke) -> Option<String> {
         format!("F{}", function_key?)
     };
     let m = &k.modifiers;
-    let mods: Vec<&str> = [(m.control, "Ctrl"), (m.alt, "Alt"), (m.shift, "Shift"), (m.platform, "Super")]
-        .into_iter()
-        .filter_map(|(on, name)| on.then_some(name))
-        .collect();
+    let mods: Vec<&str> = [
+        (m.control, "Ctrl"),
+        (m.alt, "Alt"),
+        (m.shift, "Shift"),
+        (m.platform, "Super"),
+    ]
+    .into_iter()
+    .filter_map(|(on, name)| on.then_some(name))
+    .collect();
     if mods.is_empty() && !key.starts_with('F') {
         return None;
     }
@@ -49,7 +56,12 @@ pub fn spec_from_keystroke(k: &Keystroke) -> Option<String> {
         // A lone "F" key press, not a function key.
         return None;
     }
-    Some(mods.into_iter().chain([key.as_str()]).collect::<Vec<_>>().join("+"))
+    Some(
+        mods.into_iter()
+            .chain([key.as_str()])
+            .collect::<Vec<_>>()
+            .join("+"),
+    )
 }
 
 /// How a spec reads: `Ctrl + Alt + Space`, or `⌥⌘C` on macOS.
@@ -66,7 +78,10 @@ pub fn display_shortcut(spec: &str) -> String {
             })
             .collect()
     } else {
-        parts.map(|p| if p == "Super" { "Win" } else { p }).collect::<Vec<_>>().join(" + ")
+        parts
+            .map(|p| if p == "Super" { "Win" } else { p })
+            .collect::<Vec<_>>()
+            .join(" + ")
     }
 }
 

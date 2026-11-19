@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 const NAME: &str = "RedSnap";
 
 pub fn is_enabled() -> bool {
@@ -14,12 +15,18 @@ pub fn is_enabled() -> bool {
 
 pub fn set(enabled: bool) -> Result<()> {
     let exe = std::env::current_exe().context("finding RedSnap's executable")?;
-    if enabled { imp::write(&exe) } else { imp::remove() }
+    if enabled {
+        imp::write(&exe)
+    } else {
+        imp::remove()
+    }
 }
 
 /// If start at login is on but points somewhere else, point it here.
 pub fn refresh() {
-    let Ok(exe) = std::env::current_exe() else { return };
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
     if let Some(current) = imp::read()
         && current != exe
         && let Err(e) = imp::write(&exe)
@@ -47,7 +54,15 @@ mod imp {
         let mut buf = vec![0u16; 2048];
         let mut len = (buf.len() * 2) as u32;
         let r = unsafe {
-            RegGetValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), buf.as_mut_ptr().cast(), &mut len)
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                key.as_ptr(),
+                name.as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                buf.as_mut_ptr().cast(),
+                &mut len,
+            )
         };
         if r != ERROR_SUCCESS {
             return None;
@@ -62,7 +77,14 @@ mod imp {
         let value = wide(&format!("\"{}\" --background", exe.display()));
         let (key, name) = (wide(RUN), wide(NAME));
         let r = unsafe {
-            RegSetKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr(), REG_SZ, value.as_ptr().cast(), (value.len() * 2) as u32)
+            RegSetKeyValueW(
+                HKEY_CURRENT_USER,
+                key.as_ptr(),
+                name.as_ptr(),
+                REG_SZ,
+                value.as_ptr().cast(),
+                (value.len() * 2) as u32,
+            )
         };
         anyhow::ensure!(r == ERROR_SUCCESS, "writing the Run value failed ({r})");
         Ok(())
@@ -71,7 +93,10 @@ mod imp {
     pub fn remove() -> Result<()> {
         let (key, name) = (wide(RUN), wide(NAME));
         let r = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr()) };
-        anyhow::ensure!(r == ERROR_SUCCESS || r == 2, "removing the Run value failed ({r})");
+        anyhow::ensure!(
+            r == ERROR_SUCCESS || r == 2,
+            "removing the Run value failed ({r})"
+        );
         Ok(())
     }
 }
@@ -83,7 +108,11 @@ mod imp {
     const LABEL: &str = "com.kevinwang15.redsnap";
 
     fn plist() -> Option<PathBuf> {
-        Some(dirs::home_dir()?.join("Library/LaunchAgents").join(format!("{LABEL}.plist")))
+        Some(
+            dirs::home_dir()?
+                .join("Library/LaunchAgents")
+                .join(format!("{LABEL}.plist")),
+        )
     }
 
     pub fn read() -> Option<PathBuf> {
@@ -96,7 +125,11 @@ mod imp {
     pub fn write(exe: &Path) -> Result<()> {
         let path = plist().context("no home directory")?;
         std::fs::create_dir_all(path.parent().unwrap())?;
-        let exe = exe.display().to_string().replace('&', "&amp;").replace('<', "&lt;");
+        let exe = exe
+            .display()
+            .to_string()
+            .replace('&', "&amp;")
+            .replace('<', "&lt;");
         std::fs::write(
             &path,
             format!(
@@ -140,7 +173,10 @@ mod imp {
     pub fn read() -> Option<PathBuf> {
         let text = std::fs::read_to_string(entry()?).ok()?;
         let exec = text.lines().find_map(|l| l.strip_prefix("Exec="))?;
-        let path = exec.strip_prefix('"').and_then(|s| s.split('"').next()).unwrap_or_else(|| exec.split(' ').next().unwrap_or(""));
+        let path = exec
+            .strip_prefix('"')
+            .and_then(|s| s.split('"').next())
+            .unwrap_or_else(|| exec.split(' ').next().unwrap_or(""));
         Some(PathBuf::from(path))
     }
 
@@ -148,10 +184,15 @@ mod imp {
         let path = entry().context("no config directory")?;
         std::fs::create_dir_all(path.parent().unwrap())?;
         // Desktop-entry Exec quoting: backslash, quote, dollar and backtick are escaped.
-        let quoted: String = exe.display().to_string().chars().flat_map(|c| match c {
-            '\\' | '"' | '$' | '`' => vec!['\\', c],
-            c => vec![c],
-        }).collect();
+        let quoted: String = exe
+            .display()
+            .to_string()
+            .chars()
+            .flat_map(|c| match c {
+                '\\' | '"' | '$' | '`' => vec!['\\', c],
+                c => vec![c],
+            })
+            .collect();
         std::fs::write(
             &path,
             format!(

@@ -35,7 +35,9 @@ pub struct Match {
 impl Match {
     /// Ordering for ranking: better first.
     pub fn better(&self, other: &Match) -> Ordering {
-        self.class.cmp(&other.class).then(other.score.cmp(&self.score))
+        self.class
+            .cmp(&other.class)
+            .then(other.score.cmp(&self.score))
     }
 }
 
@@ -61,7 +63,15 @@ impl Haystack {
         let utf32 = Utf32String::from(folded.as_str());
         let chars = folded.chars().count() as u32;
         let mask = char_mask(&folded);
-        Haystack { folded, chars, mask, word_starts, acronym, utf32, exact_allowed }
+        Haystack {
+            folded,
+            chars,
+            mask,
+            word_starts,
+            acronym,
+            utf32,
+            exact_allowed,
+        }
     }
 }
 
@@ -85,7 +95,11 @@ impl Names {
             add(n, true);
             // Pinyin for the name and aliases alike, but only the first few
             // spellings of aliases.
-            for (full, initials) in text::pinyin_forms(n).into_iter().take(if i == 0 { 16 } else { 4 }) {
+            for (full, initials) in
+                text::pinyin_forms(n)
+                    .into_iter()
+                    .take(if i == 0 { 16 } else { 4 })
+            {
                 add(&full, false);
                 add(&initials, false);
             }
@@ -106,10 +120,20 @@ pub struct PreparedQuery {
 impl PreparedQuery {
     pub fn new(query: &str) -> Self {
         let folded = text::fold(query.trim());
-        let pattern = Pattern::new(&folded, CaseMatching::Ignore, Normalization::Never, AtomKind::Fuzzy);
+        let pattern = Pattern::new(
+            &folded,
+            CaseMatching::Ignore,
+            Normalization::Never,
+            AtomKind::Fuzzy,
+        );
         let compact: String = folded.chars().filter(|c| !c.is_whitespace()).collect();
         let mask = char_mask(&compact);
-        PreparedQuery { folded, compact, mask, pattern }
+        PreparedQuery {
+            folded,
+            compact,
+            mask,
+            pattern,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -122,7 +146,11 @@ impl PreparedQuery {
 
     /// The best match over all of `names`' spellings, or `None`.
     pub fn best(&self, names: &Names, matcher: &mut Matcher) -> Option<Match> {
-        names.hay.iter().filter_map(|h| self.one(h, matcher)).min_by(|a, b| a.better(b))
+        names
+            .hay
+            .iter()
+            .filter_map(|h| self.one(h, matcher))
+            .min_by(|a, b| a.better(b))
     }
 
     fn one(&self, h: &Haystack, matcher: &mut Matcher) -> Option<Match> {
@@ -137,7 +165,12 @@ impl PreparedQuery {
         }
         // Shorter names first within a class: "Code" before "Code Insiders".
         let short = 1000u32.saturating_sub(h.chars);
-        let literal = |class| Some(Match { class, score: 10_000 + short });
+        let literal = |class| {
+            Some(Match {
+                class,
+                score: 10_000 + short,
+            })
+        };
         if h.exact_allowed && h.folded == q {
             return literal(MatchClass::Exact);
         }
@@ -154,7 +187,10 @@ impl PreparedQuery {
             return literal(MatchClass::Substring);
         }
         let score = self.pattern.score(h.utf32.slice(..), matcher)?;
-        Some(Match { class: MatchClass::Fuzzy, score: score + short / 10 })
+        Some(Match {
+            class: MatchClass::Fuzzy,
+            score: score + short / 10,
+        })
     }
 }
 
@@ -181,7 +217,9 @@ mod tests {
     use super::*;
 
     fn m(query: &str, name: &str) -> Option<MatchClass> {
-        PreparedQuery::new(query).best(&Names::new(name, []), &mut new_matcher()).map(|m| m.class)
+        PreparedQuery::new(query)
+            .best(&Names::new(name, []), &mut new_matcher())
+            .map(|m| m.class)
     }
 
     #[test]
@@ -214,7 +252,9 @@ mod tests {
     fn literal_beats_fuzzy_whatever_the_score() {
         let q = PreparedQuery::new("code");
         let mut mm = new_matcher();
-        let literal = q.best(&Names::new("Visual Studio Code", []), &mut mm).unwrap();
+        let literal = q
+            .best(&Names::new("Visual Studio Code", []), &mut mm)
+            .unwrap();
         let fuzzy = q.best(&Names::new("Color Desk", []), &mut mm).unwrap();
         assert_eq!(fuzzy.class, MatchClass::Fuzzy);
         assert_eq!(literal.better(&fuzzy), Ordering::Less);
@@ -223,7 +263,9 @@ mod tests {
     #[test]
     fn aliases_match_too() {
         let names = Names::new("Visual Studio Code", ["code.exe"]);
-        let got = PreparedQuery::new("code.exe").best(&names, &mut new_matcher()).unwrap();
+        let got = PreparedQuery::new("code.exe")
+            .best(&names, &mut new_matcher())
+            .unwrap();
         assert_eq!(got.class, MatchClass::Exact);
     }
 }

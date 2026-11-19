@@ -26,7 +26,11 @@ use windows as imp;
 pub fn scan(extra: &[PathBuf]) -> Result<Vec<AppEntry>> {
     let t = std::time::Instant::now();
     let apps = imp::scan(extra)?;
-    log::info!("found {} apps in {:.0} ms", apps.len(), t.elapsed().as_secs_f64() * 1000.0);
+    log::info!(
+        "found {} apps in {:.0} ms",
+        apps.len(),
+        t.elapsed().as_secs_f64() * 1000.0
+    );
     Ok(apps)
 }
 
@@ -43,11 +47,16 @@ fn decode_image(path: &Path, px: u32) -> Option<(usize, usize, Vec<u8>)> {
         #[cfg(target_os = "linux")]
         {
             let data = std::fs::read(path).ok()?;
-            let tree = resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()).ok()?;
+            let tree =
+                resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()).ok()?;
             let mut pixmap = resvg::tiny_skia::Pixmap::new(px, px)?;
             let size = tree.size();
             let scale = px as f32 / size.width().max(size.height());
-            resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
+            resvg::render(
+                &tree,
+                resvg::tiny_skia::Transform::from_scale(scale, scale),
+                &mut pixmap.as_mut(),
+            );
             // tiny-skia is premultiplied; undo it.
             let mut out = image::RgbaImage::new(px, px);
             for (o, p) in out.pixels_mut().zip(pixmap.pixels()) {

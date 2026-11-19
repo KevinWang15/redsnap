@@ -67,7 +67,10 @@ pub enum SystemCommand {
 impl SystemCommand {
     /// Commands that end the session ask for confirmation first.
     pub fn needs_confirmation(self) -> bool {
-        matches!(self, SystemCommand::LogOut | SystemCommand::Restart | SystemCommand::ShutDown)
+        matches!(
+            self,
+            SystemCommand::LogOut | SystemCommand::Restart | SystemCommand::ShutDown
+        )
     }
 }
 
@@ -127,7 +130,14 @@ impl Action {
 /// URL schemes an `OpenUrl` action may open.
 pub fn url_allowed(url: &str) -> bool {
     let lower = url.trim_start().to_ascii_lowercase();
-    ["http://", "https://", "ms-settings:", "x-apple.systempreferences:"].iter().any(|p| lower.starts_with(p))
+    [
+        "http://",
+        "https://",
+        "ms-settings:",
+        "x-apple.systempreferences:",
+    ]
+    .iter()
+    .any(|p| lower.starts_with(p))
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -9,16 +9,33 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, CursorStyle, Element, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, InteractiveElement, IntoElement,
-    KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement,
-    Pixels, Point, Render, ShapedLine, SharedString, Style, Styled, TextRun, UTF16Selection, UnderlineStyle, Window,
-    actions, div, fill, point, px, relative, rgba, size,
+    App, Bounds, ClipboardItem, Context, CursorStyle, Element, ElementId, ElementInputHandler,
+    Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId,
+    InteractiveElement, IntoElement, KeyBinding, LayoutId, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement, Pixels, Point, Render, ShapedLine,
+    SharedString, Style, Styled, TextRun, UTF16Selection, UnderlineStyle, Window, actions, div,
+    fill, point, px, relative, rgba, size,
 };
 
 use crate::perf;
 
-actions!(query_field, [Backspace, Delete, Left, Right, SelectLeft, SelectRight, SelectAll, Home, End, Paste, Cut, Copy]);
+actions!(
+    query_field,
+    [
+        Backspace,
+        Delete,
+        Left,
+        Right,
+        SelectLeft,
+        SelectRight,
+        SelectAll,
+        Home,
+        End,
+        Paste,
+        Cut,
+        Copy
+    ]
+);
 
 const CONTEXT: &str = "QueryField";
 
@@ -129,16 +146,26 @@ impl QueryField {
 
     fn previous_boundary(&self, offset: usize) -> usize {
         let offset = self.clamp(offset);
-        self.content[..offset].char_indices().next_back().map_or(0, |(i, _)| i)
+        self.content[..offset]
+            .char_indices()
+            .next_back()
+            .map_or(0, |(i, _)| i)
     }
 
     fn next_boundary(&self, offset: usize) -> usize {
         let offset = self.clamp(offset);
-        self.content[offset..].chars().next().map_or(offset, |c| offset + c.len_utf8())
+        self.content[offset..]
+            .chars()
+            .next()
+            .map_or(offset, |c| offset + c.len_utf8())
     }
 
     fn cursor(&self) -> usize {
-        if self.reversed { self.selected.start } else { self.selected.end }
+        if self.reversed {
+            self.selected.start
+        } else {
+            self.selected.end
+        }
     }
 
     fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
@@ -164,7 +191,9 @@ impl QueryField {
     }
 
     fn index_for_position(&self, position: Point<Pixels>) -> usize {
-        let (Some(bounds), Some(line)) = (self.last_bounds, self.last_layout.as_ref()) else { return 0 };
+        let (Some(bounds), Some(line)) = (self.last_bounds, self.last_layout.as_ref()) else {
+            return 0;
+        };
         if position.y < bounds.top() {
             return 0;
         }
@@ -175,12 +204,20 @@ impl QueryField {
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
-        let to = if self.selected.is_empty() { self.previous_boundary(self.cursor()) } else { self.selected.start };
+        let to = if self.selected.is_empty() {
+            self.previous_boundary(self.cursor())
+        } else {
+            self.selected.start
+        };
         self.move_to(to, cx);
     }
 
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
-        let to = if self.selected.is_empty() { self.next_boundary(self.selected.end) } else { self.selected.end };
+        let to = if self.selected.is_empty() {
+            self.next_boundary(self.selected.end)
+        } else {
+            self.selected.end
+        };
         self.move_to(to, cx);
     }
 
@@ -223,7 +260,11 @@ impl QueryField {
 
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-            let line: String = text.trim().chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+            let line: String = text
+                .trim()
+                .chars()
+                .map(|c| if c.is_control() { ' ' } else { c })
+                .collect();
             self.replace_text_in_range(None, &line, window, cx);
         }
     }
@@ -231,7 +272,9 @@ impl QueryField {
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if !self.selected.is_empty() {
             let selected = self.clamp_range(&self.selected);
-            cx.write_to_clipboard(ClipboardItem::new_string(self.content[selected].to_string()));
+            cx.write_to_clipboard(ClipboardItem::new_string(
+                self.content[selected].to_string(),
+            ));
         } else {
             // Nothing selected: let the window copy the selected result.
             cx.propagate();
@@ -290,8 +333,16 @@ impl EntityInputHandler for QueryField {
         Some(self.content[range].to_string())
     }
 
-    fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
-        Some(UTF16Selection { range: self.utf16_range(&self.selected), reversed: self.reversed })
+    fn selected_text_range(
+        &mut self,
+        _: bool,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<UTF16Selection> {
+        Some(UTF16Selection {
+            range: self.utf16_range(&self.selected),
+            reversed: self.reversed,
+        })
     }
 
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
@@ -304,7 +355,13 @@ impl EntityInputHandler for QueryField {
         }
     }
 
-    fn replace_text_in_range(&mut self, range: Option<Range<usize>>, text: &str, _: &mut Window, cx: &mut Context<Self>) {
+    fn replace_text_in_range(
+        &mut self,
+        range: Option<Range<usize>>,
+        text: &str,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         perf::input_started();
         let range = range
             .as_ref()
@@ -341,7 +398,8 @@ impl EntityInputHandler for QueryField {
             .map(|r| {
                 // Relative to the inserted text, in its UTF-16 units.
                 let base = byte_to_utf16(&self.content, range.start);
-                utf16_to_byte(&self.content, base + r.start)..utf16_to_byte(&self.content, base + r.end)
+                utf16_to_byte(&self.content, base + r.start)
+                    ..utf16_to_byte(&self.content, base + r.end)
             })
             .unwrap_or(range.start + text.len()..range.start + text.len());
         cx.notify();
@@ -357,10 +415,18 @@ impl EntityInputHandler for QueryField {
         let line = self.last_layout.as_ref()?;
         let range = self.byte_range(&range);
         let x = |i| bounds.left() + line.x_for_index(i) - self.scroll;
-        Some(Bounds::from_corners(point(x(range.start), bounds.top()), point(x(range.end), bounds.bottom())))
+        Some(Bounds::from_corners(
+            point(x(range.start), bounds.top()),
+            point(x(range.end), bounds.bottom()),
+        ))
     }
 
-    fn character_index_for_point(&mut self, p: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
+    fn character_index_for_point(
+        &mut self,
+        p: Point<Pixels>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<usize> {
         let bounds = self.last_bounds?;
         let line = self.last_layout.as_ref()?;
         let index = line.index_for_x(p.x - bounds.left() + self.scroll)?;
@@ -395,11 +461,17 @@ fn utf16_to_byte(text: &str, offset: usize) -> usize {
 }
 
 fn byte_to_utf16(text: &str, offset: usize) -> usize {
-    text[..clamp_offset(text, offset)].chars().map(char::len_utf16).sum()
+    text[..clamp_offset(text, offset)]
+        .chars()
+        .map(char::len_utf16)
+        .sum()
 }
 
 fn range_from_utf16(text: &str, r: &Range<usize>) -> Range<usize> {
-    clamp_range(text, &(utf16_to_byte(text, r.start)..utf16_to_byte(text, r.end)))
+    clamp_range(
+        text,
+        &(utf16_to_byte(text, r.start)..utf16_to_byte(text, r.end)),
+    )
 }
 
 fn range_to_utf16(text: &str, r: &Range<usize>) -> Range<usize> {
@@ -460,9 +532,19 @@ impl Element for TextElement {
         } else {
             (field.content.clone(), style.color)
         };
-        let (selected, cursor) =
-            if empty { (0..0, 0) } else { (field.clamp_range(&field.selected), field.clamp(field.cursor())) };
-        let marked = field.marked.as_ref().filter(|_| !empty).map(|m| field.clamp_range(m));
+        let (selected, cursor) = if empty {
+            (0..0, 0)
+        } else {
+            (
+                field.clamp_range(&field.selected),
+                field.clamp(field.cursor()),
+            )
+        };
+        let marked = field
+            .marked
+            .as_ref()
+            .filter(|_| !empty)
+            .map(|m| field.clamp_range(m));
         let old_scroll = field.scroll;
 
         let run = TextRun {
@@ -475,11 +557,25 @@ impl Element for TextElement {
         };
         let runs = match marked {
             Some(m) => {
-                let underline = UnderlineStyle { color: Some(run.color), thickness: px(1.0), wavy: false };
+                let underline = UnderlineStyle {
+                    color: Some(run.color),
+                    thickness: px(1.0),
+                    wavy: false,
+                };
                 [
-                    TextRun { len: m.start, ..run.clone() },
-                    TextRun { len: m.end - m.start, underline: Some(underline), ..run.clone() },
-                    TextRun { len: text.len() - m.end, ..run },
+                    TextRun {
+                        len: m.start,
+                        ..run.clone()
+                    },
+                    TextRun {
+                        len: m.end - m.start,
+                        underline: Some(underline),
+                        ..run.clone()
+                    },
+                    TextRun {
+                        len: text.len() - m.end,
+                        ..run
+                    },
                 ]
                 .into_iter()
                 .filter(|r| r.len > 0)
@@ -488,7 +584,9 @@ impl Element for TextElement {
             None => vec![run],
         };
         let font_size = style.font_size.to_pixels(window.rem_size());
-        let line = window.text_system().shape_line(text.into(), font_size, &runs, None);
+        let line = window
+            .text_system()
+            .shape_line(text.into(), font_size, &runs, None);
 
         // Keep the caret in view.
         let caret_x = line.x_for_index(cursor);
@@ -503,13 +601,23 @@ impl Element for TextElement {
 
         let x = |i: usize| bounds.left() + line.x_for_index(i) - scroll;
         let (selection, caret) = if selected.is_empty() {
-            let caret = Bounds::new(point(x(cursor), bounds.top()), size(px(1.5), bounds.size.height));
+            let caret = Bounds::new(
+                point(x(cursor), bounds.top()),
+                size(px(1.5), bounds.size.height),
+            );
             (None, Some(fill(caret, rgba(0xFFFF_FFFF))))
         } else {
-            let r = Bounds::from_corners(point(x(selected.start), bounds.top()), point(x(selected.end), bounds.bottom()));
+            let r = Bounds::from_corners(
+                point(x(selected.start), bounds.top()),
+                point(x(selected.end), bounds.bottom()),
+            );
             (Some(fill(r, rgba(0xE12D_4666))), None)
         };
-        Prepaint { line, caret, selection }
+        Prepaint {
+            line,
+            caret,
+            selection,
+        }
     }
 
     fn paint(
@@ -526,13 +634,27 @@ impl Element for TextElement {
             let f = self.field.read(cx);
             (f.focus.clone(), f.scroll)
         };
-        window.handle_input(&focus, ElementInputHandler::new(bounds, self.field.clone()), cx);
+        window.handle_input(
+            &focus,
+            ElementInputHandler::new(bounds, self.field.clone()),
+            cx,
+        );
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
             if let Some(selection) = prepaint.selection.take() {
                 window.paint_quad(selection);
             }
             let origin = point(bounds.left() - scroll, bounds.top());
-            prepaint.line.paint(origin, window.line_height(), gpui::TextAlign::Left, None, window, cx).ok();
+            prepaint
+                .line
+                .paint(
+                    origin,
+                    window.line_height(),
+                    gpui::TextAlign::Left,
+                    None,
+                    window,
+                    cx,
+                )
+                .ok();
             if focus.is_focused(window)
                 && let Some(caret) = prepaint.caret.take()
             {

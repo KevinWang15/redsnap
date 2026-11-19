@@ -29,7 +29,11 @@ impl ExpanderConfig {
         ExpanderConfig {
             enabled: s.expand_as_you_type,
             triggers: Triggers::new(&s.items),
-            templates: s.items.iter().map(|i| (i.id.clone(), i.text.clone())).collect(),
+            templates: s
+                .items
+                .iter()
+                .map(|i| (i.id.clone(), i.text.clone()))
+                .collect(),
             excluded_apps: s.excluded_apps.iter().map(|a| a.to_lowercase()).collect(),
         }
     }
@@ -45,7 +49,9 @@ impl Expander {
     /// `None` where expansion as you type isn't available yet (macOS, Linux).
     pub fn start(config: ExpanderConfig) -> anyhow::Result<Option<Expander>> {
         #[cfg(windows)]
-        return Ok(Some(Expander { inner: windows::Expander::start(config)? }));
+        return Ok(Some(Expander {
+            inner: windows::Expander::start(config)?,
+        }));
         #[cfg(not(windows))]
         {
             let _ = config;

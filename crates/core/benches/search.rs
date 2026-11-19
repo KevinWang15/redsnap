@@ -8,20 +8,39 @@ use std::time::Instant;
 use arc_swap::ArcSwap;
 use redsnap_core::item::LaunchTarget;
 use redsnap_core::providers::apps::{AppCatalog, AppEntry, AppsProvider};
-use redsnap_core::providers::{CalculatorProvider, CommandsProvider, OpenProvider, WebSearchProvider};
+use redsnap_core::providers::{
+    CalculatorProvider, CommandsProvider, OpenProvider, WebSearchProvider,
+};
 use redsnap_core::search::Engine;
 use redsnap_core::usage::Usage;
 
 fn main() {
-    let words = ["Smart", "Quick", "Pro", "Studio", "Cloud", "Pixel", "Sound", "Data", "Note", "Code", "Photo", "Video"];
-    let tails = ["Editor", "Viewer", "Manager", "Player", "Sync", "Monitor", "Reader", "Board", "Lab", "Hub"];
-    let cjk = ["文档", "音乐", "视频", "照片", "笔记", "邮件", "日历", "地图", "翻译", "会议"];
+    let words = [
+        "Smart", "Quick", "Pro", "Studio", "Cloud", "Pixel", "Sound", "Data", "Note", "Code",
+        "Photo", "Video",
+    ];
+    let tails = [
+        "Editor", "Viewer", "Manager", "Player", "Sync", "Monitor", "Reader", "Board", "Lab", "Hub",
+    ];
+    let cjk = [
+        "文档", "音乐", "视频", "照片", "笔记", "邮件", "日历", "地图", "翻译", "会议",
+    ];
     let mut entries = Vec::new();
     for i in 0..10_000 {
         let name = if i % 5 == 0 {
-            format!("{}{}{}", words[i % words.len()], cjk[(i / 7) % cjk.len()], i)
+            format!(
+                "{}{}{}",
+                words[i % words.len()],
+                cjk[(i / 7) % cjk.len()],
+                i
+            )
         } else {
-            format!("{} {} {}", words[i % words.len()], tails[(i / 3) % tails.len()], i)
+            format!(
+                "{} {} {}",
+                words[i % words.len()],
+                tails[(i / 3) % tails.len()],
+                i
+            )
         };
         entries.push(AppEntry {
             key: format!("app{i}"),
@@ -34,7 +53,11 @@ fn main() {
     }
     let built = Instant::now();
     let catalog = AppCatalog::build(entries, &BTreeMap::new(), &[]);
-    println!("catalog of {} apps built in {:.1} ms", catalog.len(), built.elapsed().as_secs_f64() * 1000.0);
+    println!(
+        "catalog of {} apps built in {:.1} ms",
+        catalog.len(),
+        built.elapsed().as_secs_f64() * 1000.0
+    );
     let config = redsnap_core::config::Config::default();
     let mut engine = Engine::new(
         vec![
@@ -47,7 +70,9 @@ fn main() {
         Default::default(),
     );
     let usage = Arc::new(Usage::default());
-    for query in ["s", "st", "stu", "stud", "studio", "vsc", "yy", "yinyue", "音乐", "zzz", "1+2", ""] {
+    for query in [
+        "s", "st", "stu", "stud", "studio", "vsc", "yy", "yinyue", "音乐", "zzz", "1+2", "",
+    ] {
         let mut times: Vec<f64> = (0..50)
             .map(|_| {
                 let t = Instant::now();
@@ -56,6 +81,9 @@ fn main() {
             })
             .collect();
         times.sort_by(f64::total_cmp);
-        println!("{query:>8}: p50 {:.2} ms  p95 {:.2} ms", times[25], times[47]);
+        println!(
+            "{query:>8}: p50 {:.2} ms  p95 {:.2} ms",
+            times[25], times[47]
+        );
     }
 }

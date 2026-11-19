@@ -21,7 +21,11 @@ fn main() -> anyhow::Result<()> {
     let t = Instant::now();
     search.request(request);
     let r = rx.recv_timeout(Duration::from_secs(10))?;
-    println!("{BACKEND}: {:?} in {:.1} ms", r.request, t.elapsed().as_secs_f64() * 1000.0);
+    println!(
+        "{BACKEND}: {:?} in {:.1} ms",
+        r.request,
+        t.elapsed().as_secs_f64() * 1000.0
+    );
     match r.outcome {
         Outcome::Hits(hits) => {
             for h in hits.iter().take(30) {

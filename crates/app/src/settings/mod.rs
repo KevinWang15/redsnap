@@ -12,7 +12,10 @@ mod widgets;
 
 use anyhow::Result;
 use futures::channel::oneshot;
-use gpui::{App, AppContext, AsyncApp, Bounds, Point, TitlebarOptions, WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind, WindowOptions, px, size};
+use gpui::{
+    App, AppContext, AsyncApp, Bounds, Point, TitlebarOptions, WindowBackgroundAppearance,
+    WindowBounds, WindowHandle, WindowKind, WindowOptions, px, size,
+};
 use serde_json::Value;
 
 use crate::app::{Event, Events};
@@ -27,7 +30,10 @@ pub fn request(cx: &App, method: &str, params: Value) -> oneshot::Receiver<Resul
     let reply: Reply = Box::new(move |r| {
         let _ = tx.send(r);
     });
-    let _ = cx.global::<Events>().0.unbounded_send(Event::Settings(method.to_string(), params, reply));
+    let _ =
+        cx.global::<Events>()
+            .0
+            .unbounded_send(Event::Settings(method.to_string(), params, reply));
     rx
 }
 
@@ -43,7 +49,8 @@ impl SettingsHost {
     /// Opens the settings window, or brings it forward if it's open.
     pub fn open(&mut self, cx: &mut AsyncApp) -> Result<()> {
         if let Some(w) = self.window
-            && w.update(cx, |_, window, _| window.activate_window()).is_ok()
+            && w.update(cx, |_, window, _| window.activate_window())
+                .is_ok()
         {
             return Ok(());
         }
@@ -57,7 +64,10 @@ impl SettingsHost {
                     titlebar: Some(TitlebarOptions {
                         title: Some("RedSnap Settings".into()),
                         appears_transparent: true,
-                        traffic_light_position: Some(Point { x: px(14.), y: px(13.) }),
+                        traffic_light_position: Some(Point {
+                            x: px(14.),
+                            y: px(13.),
+                        }),
                     }),
                     focus: true,
                     show: true,
@@ -91,7 +101,10 @@ impl SettingsHost {
     /// Tells the open window about a change made elsewhere.
     pub fn push(&self, cx: &mut AsyncApp, event: &str, params: Value) {
         if let Some(w) = self.window {
-            w.update(cx, |view, window, cx| view.pushed(event, params, window, cx)).ok();
+            w.update(cx, |view, window, cx| {
+                view.pushed(event, params, window, cx)
+            })
+            .ok();
         }
     }
 }

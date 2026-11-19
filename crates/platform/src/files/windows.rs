@@ -13,12 +13,14 @@ use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::INFINITE;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowW, HWND_MESSAGE, MSG, MsgWaitForMultipleObjects, PM_REMOVE,
-    PeekMessageW, QS_ALLINPUT, RegisterClassW, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_COPYDATA, WM_USER, WNDCLASSW,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowW, HWND_MESSAGE, MSG,
+    MsgWaitForMultipleObjects, PM_REMOVE, PeekMessageW, QS_ALLINPUT, RegisterClassW,
+    SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_COPYDATA, WM_USER, WNDCLASSW,
 };
 
 pub const BACKEND: &str = "Everything";
-pub const SYNTAX: &str = "Type part of a name. Everything's syntax works too: *.pdf, ext:docx, folder:, a\\path\\";
+pub const SYNTAX: &str =
+    "Type part of a name. Everything's syntax works too: *.pdf, ext:docx, folder:, a\\path\\";
 
 // From the Everything SDK's everything_ipc.h.
 /// `WM_USER` commands.
@@ -31,7 +33,10 @@ const SORT_DATE_MODIFIED_DESCENDING: u32 = 14;
 const ITEM_FOLDER: u32 = 0x1;
 const ITEM_DRIVE: u32 = 0x2;
 /// Everything 1.4's window class, then 1.5 alpha's (its default instance).
-const WINDOW_CLASSES: [&str; 2] = ["EVERYTHING_TASKBAR_NOTIFICATION", "EVERYTHING_TASKBAR_NOTIFICATION_(1.5a)"];
+const WINDOW_CLASSES: [&str; 2] = [
+    "EVERYTHING_TASKBAR_NOTIFICATION",
+    "EVERYTHING_TASKBAR_NOTIFICATION_(1.5a)",
+];
 
 const SEND_TIMEOUT_MS: u32 = 2000;
 const REPLY_TIMEOUT: Duration = Duration::from_secs(3);
@@ -43,7 +48,8 @@ fn wide(s: &str) -> Vec<u16> {
 fn not_running() -> Outcome {
     Outcome::Unavailable {
         title: "Everything isn't running".into(),
-        subtitle: "File search uses Everything: start it, or get it from voidtools.com (Enter)".into(),
+        subtitle: "File search uses Everything: start it, or get it from voidtools.com (Enter)"
+            .into(),
         url: Some("https://www.voidtools.com/".into()),
     }
 }
@@ -59,7 +65,17 @@ fn everything_window() -> Option<HWND> {
 /// `msg` to Everything; `None` when it didn't answer in time.
 fn send(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<usize> {
     let mut result = 0usize;
-    let ok = unsafe { SendMessageTimeoutW(hwnd, msg, wparam, lparam, SMTO_ABORTIFHUNG, SEND_TIMEOUT_MS, &mut result) };
+    let ok = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            msg,
+            wparam,
+            lparam,
+            SMTO_ABORTIFHUNG,
+            SEND_TIMEOUT_MS,
+            &mut result,
+        )
+    };
     (ok != 0).then_some(result)
 }
 
@@ -72,12 +88,18 @@ thread_local! {
     static REPLY: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
 }
 
-unsafe extern "system" fn reply_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn reply_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     if msg == WM_COPYDATA && lparam != 0 {
         let cds = unsafe { &*(lparam as *const COPYDATASTRUCT) };
         // An answer to an older query that timed out is dropped.
         if cds.dwData == WAITING_FOR.get() as usize && !cds.lpData.is_null() {
-            let data = unsafe { std::slice::from_raw_parts(cds.lpData as *const u8, cds.cbData as usize) };
+            let data =
+                unsafe { std::slice::from_raw_parts(cds.lpData as *const u8, cds.cbData as usize) };
             REPLY.set(Some(data.to_vec()));
         }
         return 1;
@@ -93,9 +115,27 @@ fn reply_window() -> Option<HWND> {
     let class = wide("RedSnap.EverythingReply");
     unsafe {
         let instance = GetModuleHandleW(std::ptr::null());
-        let wc = WNDCLASSW { lpfnWndProc: Some(reply_proc), hInstance: instance, lpszClassName: class.as_ptr(), ..std::mem::zeroed() };
+        let wc = WNDCLASSW {
+            lpfnWndProc: Some(reply_proc),
+            hInstance: instance,
+            lpszClassName: class.as_ptr(),
+            ..std::mem::zeroed()
+        };
         RegisterClassW(&wc);
-        let hwnd = CreateWindowExW(0, class.as_ptr(), std::ptr::null(), 0, 0, 0, 0, 0, HWND_MESSAGE, std::ptr::null_mut(), instance, std::ptr::null());
+        let hwnd = CreateWindowExW(
+            0,
+            class.as_ptr(),
+            std::ptr::null(),
+            0,
+            0,
+            0,
+            0,
+            0,
+            HWND_MESSAGE,
+            std::ptr::null_mut(),
+            instance,
+            std::ptr::null(),
+        );
         if hwnd.is_null() {
             return None;
         }
@@ -143,7 +183,9 @@ fn query_message(reply_hwnd: HWND, id: u32, words: &str, limit: usize) -> Vec<u8
 }
 
 pub fn search(words: &str, limit: usize) -> Outcome {
-    let Some(everything) = everything_window() else { return not_running() };
+    let Some(everything) = everything_window() else {
+        return not_running();
+    };
     match send(everything, WM_USER, IPC_IS_DB_LOADED, 0) {
         None => return Outcome::Failed("Everything didn't answer".into()),
         Some(0) => {
@@ -158,16 +200,31 @@ pub fn search(words: &str, limit: usize) -> Outcome {
     if words.trim().is_empty() {
         return Outcome::Hits(Vec::new());
     }
-    let Some(reply_hwnd) = reply_window() else { return Outcome::Failed("can't receive Everything's answers".into()) };
+    let Some(reply_hwnd) = reply_window() else {
+        return Outcome::Failed("can't receive Everything's answers".into());
+    };
     let id = NEXT_ID.get();
     NEXT_ID.set(id.wrapping_add(1).max(1));
     WAITING_FOR.set(id);
     REPLY.set(None);
     let mut message = query_message(reply_hwnd, id, words, limit);
-    let cds = COPYDATASTRUCT { dwData: COPYDATA_QUERY2W, cbData: message.len() as u32, lpData: message.as_mut_ptr().cast() };
-    match send(everything, WM_COPYDATA, reply_hwnd as WPARAM, &cds as *const COPYDATASTRUCT as LPARAM) {
+    let cds = COPYDATASTRUCT {
+        dwData: COPYDATA_QUERY2W,
+        cbData: message.len() as u32,
+        lpData: message.as_mut_ptr().cast(),
+    };
+    match send(
+        everything,
+        WM_COPYDATA,
+        reply_hwnd as WPARAM,
+        &cds as *const COPYDATASTRUCT as LPARAM,
+    ) {
         None => return Outcome::Failed("Everything didn't answer".into()),
-        Some(0) => return Outcome::Failed("Everything refused the search (RedSnap needs Everything 1.4.1 or later)".into()),
+        Some(0) => {
+            return Outcome::Failed(
+                "Everything refused the search (RedSnap needs Everything 1.4.1 or later)".into(),
+            );
+        }
         Some(_) => {}
     }
     match wait_for_reply() {
@@ -183,11 +240,19 @@ pub fn search(words: &str, limit: usize) -> Outcome {
 /// offset), and for each item its name then its path, each a character
 /// count, the UTF-16 text and a terminator. Offsets are from the start.
 fn parse(data: &[u8], limit: usize) -> Option<Vec<FileHit>> {
-    let u32_at = |at: usize| data.get(at..at + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
+    let u32_at = |at: usize| {
+        data.get(at..at + 4)
+            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+    };
     let string_at = |at: usize| -> Option<(String, usize)> {
         let len = u32_at(at)? as usize;
         let bytes = data.get(at + 4..at + 4 + len * 2)?;
-        let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
+        let units: Vec<u16> = bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_le_bytes(*c))
+            .collect();
         Some((String::from_utf16_lossy(&units), at + 4 + (len + 1) * 2))
     };
     let count = u32_at(4)? as usize;
@@ -201,8 +266,17 @@ fn parse(data: &[u8], limit: usize) -> Option<Vec<FileHit>> {
         let (name, next) = string_at(u32_at(item + 4)? as usize)?;
         let (dir, _) = string_at(next)?;
         // A drive comes as its name (`C:`) and no path.
-        let path = if dir.is_empty() { PathBuf::from(format!("{name}\\")) } else { PathBuf::from(dir).join(&name) };
-        hits.push(FileHit { path, name, is_dir: flags & (ITEM_FOLDER | ITEM_DRIVE) != 0, hidden: false });
+        let path = if dir.is_empty() {
+            PathBuf::from(format!("{name}\\"))
+        } else {
+            PathBuf::from(dir).join(&name)
+        };
+        hits.push(FileHit {
+            path,
+            name,
+            is_dir: flags & (ITEM_FOLDER | ITEM_DRIVE) != 0,
+            hidden: false,
+        });
     }
     Some(hits)
 }
@@ -213,7 +287,13 @@ mod tests {
 
     /// An answer laid out the way Everything sends it.
     fn answer(items: &[(u32, &str, &str)]) -> Vec<u8> {
-        let mut head: Vec<u32> = vec![99, items.len() as u32, 0, REQUEST_NAME | REQUEST_PATH, SORT_DATE_MODIFIED_DESCENDING];
+        let mut head: Vec<u32> = vec![
+            99,
+            items.len() as u32,
+            0,
+            REQUEST_NAME | REQUEST_PATH,
+            SORT_DATE_MODIFIED_DESCENDING,
+        ];
         let mut strings = Vec::new();
         let data_start = 20 + items.len() * 8;
         let mut offsets = Vec::new();
@@ -222,7 +302,12 @@ mod tests {
             for s in [name, path] {
                 let units: Vec<u16> = s.encode_utf16().collect();
                 strings.extend((units.len() as u32).to_le_bytes());
-                strings.extend(units.iter().chain([0u16].iter()).flat_map(|u| u.to_le_bytes()));
+                strings.extend(
+                    units
+                        .iter()
+                        .chain([0u16].iter())
+                        .flat_map(|u| u.to_le_bytes()),
+                );
             }
         }
         for (f, o) in offsets {
@@ -235,12 +320,25 @@ mod tests {
 
     #[test]
     fn reads_an_answer() {
-        let data = answer(&[(0, "report.pdf", "C:\\Users\\me\\Documents"), (ITEM_FOLDER, "微信", "D:\\apps"), (ITEM_DRIVE, "C:", "")]);
+        let data = answer(&[
+            (0, "report.pdf", "C:\\Users\\me\\Documents"),
+            (ITEM_FOLDER, "微信", "D:\\apps"),
+            (ITEM_DRIVE, "C:", ""),
+        ]);
         let hits = parse(&data, 10).unwrap();
-        assert_eq!(hits[0].path, PathBuf::from("C:\\Users\\me\\Documents\\report.pdf"));
-        assert_eq!((hits[0].name.as_str(), hits[0].is_dir), ("report.pdf", false));
+        assert_eq!(
+            hits[0].path,
+            PathBuf::from("C:\\Users\\me\\Documents\\report.pdf")
+        );
+        assert_eq!(
+            (hits[0].name.as_str(), hits[0].is_dir),
+            ("report.pdf", false)
+        );
         assert_eq!((hits[1].name.as_str(), hits[1].is_dir), ("微信", true));
-        assert_eq!((hits[2].path.clone(), hits[2].is_dir), (PathBuf::from("C:\\"), true));
+        assert_eq!(
+            (hits[2].path.clone(), hits[2].is_dir),
+            (PathBuf::from("C:\\"), true)
+        );
         assert_eq!(parse(&data, 1).unwrap().len(), 1);
         // Cut short: refused, not misread.
         assert!(parse(&data[..data.len() - 6], 10).is_none());
@@ -249,7 +347,12 @@ mod tests {
     #[test]
     fn query_layout() {
         let m = query_message(0x1234 as HWND, 7, "ab", 50);
-        let words: Vec<u32> = m[..28].as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect();
+        let words: Vec<u32> = m[..28]
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| u32::from_le_bytes(*c))
+            .collect();
         assert_eq!(words, [0x1234, 7, 0, 0, 50, 3, 14]);
         assert_eq!(&m[28..], &[b'a', 0, b'b', 0, 0, 0]);
     }

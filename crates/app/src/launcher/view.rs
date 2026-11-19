@@ -1,9 +1,9 @@
 //! Drawing the search window (docs/design.md).
 
 use gpui::{
-    AnyElement, BoxShadow, Context, Hsla, InteractiveElement, IntoElement, StatefulInteractiveElement, ObjectFit, ParentElement, Render,
-    SharedString, Styled, StyledImage, Window, div, img, linear_color_stop, linear_gradient, point,
-    prelude::FluentBuilder, px, rgb, rgba,
+    AnyElement, BoxShadow, Context, Hsla, InteractiveElement, IntoElement, ObjectFit,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, StyledImage, Window,
+    div, img, linear_color_stop, linear_gradient, point, prelude::FluentBuilder, px, rgb, rgba,
 };
 use redsnap_core::item::{Action, IconRef, Item};
 
@@ -22,7 +22,11 @@ fn with_alpha(rgb: u32, alpha: f32) -> gpui::Rgba {
 }
 
 fn shortcut(n: usize) -> String {
-    if cfg!(target_os = "macos") { format!("⌘{n}") } else { format!("Ctrl {n}") }
+    if cfg!(target_os = "macos") {
+        format!("⌘{n}")
+    } else {
+        format!("Ctrl {n}")
+    }
 }
 
 impl Render for Launcher {
@@ -34,11 +38,19 @@ impl Render for Launcher {
         let has_query = !self.field.read(cx).is_empty();
         let rows = self.opts.rows;
         let count = self.hits.len();
-        let list: Vec<AnyElement> =
-            (self.top..(self.top + rows).min(count)).map(|i| self.row(i, i == self.selected, i - self.top, cx)).collect();
+        let list: Vec<AnyElement> = (self.top..(self.top + rows).min(count))
+            .map(|i| self.row(i, i == self.selected, i - self.top, cx))
+            .collect();
         let alpha = self.opts.fill;
         let radius = px(self.opts.radius);
-        let layer = || div().absolute().top_0().left_0().size_full().rounded(radius);
+        let layer = || {
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .rounded(radius)
+        };
 
         let search_row = div()
             .flex()
@@ -79,30 +91,34 @@ impl Render for Launcher {
             .child(logo_button());
 
         let in_clip = self.in_clipboard();
-        let results = if in_clip { self.clip_body(cx) } else { div()
-            .relative()
-            .mt(px(12.))
-            .h(px(rows as f32 * 66.))
-            .flex()
-            .flex_col()
-            .gap(px(4.))
-            .when_some(self.notice.clone(), |d, notice| {
-                d.child(
-                    div()
-                        .px(px(14.))
-                        .py(px(8.))
-                        .rounded(px(10.))
-                        .bg(rgba(0xE8344E26))
-                        .border_1()
-                        .border_color(rgba(0xE8344E66))
-                        .text_size(px(13.))
-                        .text_color(white(0.9))
-                        .child(notice),
-                )
-            })
-            .children(list)
-            .when_some(self.panel.as_ref(), |d, panel| d.child(action_panel(panel)))
-            .into_any_element() };
+        let results = if in_clip {
+            self.clip_body(cx)
+        } else {
+            div()
+                .relative()
+                .mt(px(12.))
+                .h(px(rows as f32 * 66.))
+                .flex()
+                .flex_col()
+                .gap(px(4.))
+                .when_some(self.notice.clone(), |d, notice| {
+                    d.child(
+                        div()
+                            .px(px(14.))
+                            .py(px(8.))
+                            .rounded(px(10.))
+                            .bg(rgba(0xE8344E26))
+                            .border_1()
+                            .border_color(rgba(0xE8344E66))
+                            .text_size(px(13.))
+                            .text_color(white(0.9))
+                            .child(notice),
+                    )
+                })
+                .children(list)
+                .when_some(self.panel.as_ref(), |d, panel| d.child(action_panel(panel)))
+                .into_any_element()
+        };
 
         let footer_status: SharedString = match &self.confirming {
             Some(item) => format!("Press Enter again to {}", item.title.to_lowercase()).into(),
@@ -115,9 +131,17 @@ impl Render for Launcher {
         let enter_label: &'static str = if in_clip {
             "Paste"
         } else {
-            self.hits.get(self.selected).map(|h| h.item.primary.label()).filter(|l| !l.is_empty()).unwrap_or("Open")
+            self.hits
+                .get(self.selected)
+                .map(|h| h.item.primary.label())
+                .filter(|l| !l.is_empty())
+                .unwrap_or("Open")
         };
-        let copy_key: &'static str = if cfg!(target_os = "macos") { "⌘C" } else { "Ctrl C" };
+        let copy_key: &'static str = if cfg!(target_os = "macos") {
+            "⌘C"
+        } else {
+            "Ctrl C"
+        };
         let footer = div()
             .mt_auto()
             .h(px(44.))
@@ -128,16 +152,32 @@ impl Render for Launcher {
             .text_size(px(13.))
             .child(
                 div()
-                    .text_color(if self.confirming.is_some() { rgb(0xFF8090).into() } else { white(0.5) })
+                    .text_color(if self.confirming.is_some() {
+                        rgb(0xFF8090).into()
+                    } else {
+                        white(0.5)
+                    })
                     .child(footer_status),
             )
             .child(div().flex_1())
-            .child(key_hint(Cap::Icon(crate::assets::icon::ARROW_UP_DOWN), "Navigate"))
+            .child(key_hint(
+                Cap::Icon(crate::assets::icon::ARROW_UP_DOWN),
+                "Navigate",
+            ))
             .child(div().w(px(16.)))
-            .child(key_hint(Cap::Icon(crate::assets::icon::CORNER_DOWN_LEFT), enter_label))
+            .child(key_hint(
+                Cap::Icon(crate::assets::icon::CORNER_DOWN_LEFT),
+                enter_label,
+            ))
             .child(div().w(px(16.)))
-            .when(in_clip, |d| d.child(key_hint(Cap::Text(copy_key), "Copy")).child(div().w(px(16.))))
-            .child(key_hint(Cap::Icon(crate::assets::icon::ARROW_RIGHT_TO_LINE), "Actions"));
+            .when(in_clip, |d| {
+                d.child(key_hint(Cap::Text(copy_key), "Copy"))
+                    .child(div().w(px(16.)))
+            })
+            .child(key_hint(
+                Cap::Icon(crate::assets::icon::ARROW_RIGHT_TO_LINE),
+                "Actions",
+            ));
 
         let content = div()
             .relative()
@@ -196,7 +236,11 @@ impl Launcher {
         let hint: AnyElement = if selected {
             icon_svg(crate::assets::icon::CORNER_DOWN_LEFT, 17., white(0.9)).into_any_element()
         } else if slot < 9 {
-            div().text_size(px(15.)).text_color(white(0.45)).child(SharedString::from(shortcut(slot + 1))).into_any_element()
+            div()
+                .text_size(px(15.))
+                .text_color(white(0.45))
+                .child(SharedString::from(shortcut(slot + 1)))
+                .into_any_element()
         } else {
             div().into_any_element()
         };
@@ -213,15 +257,19 @@ impl Launcher {
             .border_color(gpui::transparent_black())
             .when(!selected, |d| d.hover(|s| s.bg(white(0.04))))
             .when(selected, |d| {
-                d.bg(linear_gradient(90., linear_color_stop(rgb(0xB3263A), 0.), linear_color_stop(rgb(0x8E1F33), 1.)))
-                    .border_color(rgba(0xFF788273))
-                    .shadow(vec![BoxShadow {
-                        color: rgba(0xC81E3259).into(),
-                        offset: point(px(0.), px(4.)),
-                        blur_radius: px(18.),
-                        spread_radius: px(0.),
-            inset: false,
-                    }])
+                d.bg(linear_gradient(
+                    90.,
+                    linear_color_stop(rgb(0xB3263A), 0.),
+                    linear_color_stop(rgb(0x8E1F33), 1.),
+                ))
+                .border_color(rgba(0xFF788273))
+                .shadow(vec![BoxShadow {
+                    color: rgba(0xC81E3259).into(),
+                    offset: point(px(0.), px(4.)),
+                    blur_radius: px(18.),
+                    spread_radius: px(0.),
+                    inset: false,
+                }])
             })
             .on_click(cx.listener(move |this, _, _, cx| this.run_row(slot, cx)))
             .child(icon(item, cx))
@@ -232,7 +280,13 @@ impl Launcher {
                     .flex()
                     .flex_col()
                     .overflow_hidden()
-                    .child(div().text_size(px(19.)).font_weight(gpui::FontWeight::MEDIUM).truncate().child(item.title.clone()))
+                    .child(
+                        div()
+                            .text_size(px(19.))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .truncate()
+                            .child(item.title.clone()),
+                    )
                     .child(
                         div()
                             .text_size(px(13.))
@@ -253,9 +307,22 @@ fn icon(item: &Item, cx: &gpui::App) -> AnyElement {
     if let (IconRef::App(id), Action::Launch(target)) = (&item.icon, &item.primary)
         && let Some(image) = crate::icons::get(cx, id, target)
     {
-        return img(image).size(px(38.)).flex_none().object_fit(ObjectFit::Contain).into_any_element();
+        return img(image)
+            .size(px(38.))
+            .flex_none()
+            .object_fit(ObjectFit::Contain)
+            .into_any_element();
     }
-    let tile = |color: u32| div().size(px(38.)).flex_none().rounded(px(9.)).bg(rgb(color)).flex().items_center().justify_center();
+    let tile = |color: u32| {
+        div()
+            .size(px(38.))
+            .flex_none()
+            .rounded(px(9.))
+            .bg(rgb(color))
+            .flex()
+            .items_center()
+            .justify_center()
+    };
     match &item.icon {
         IconRef::Builtin(name) => {
             let path = match *name {
@@ -271,12 +338,24 @@ fn icon(item: &Item, cx: &gpui::App) -> AnyElement {
                 "snippet" => i::SQUARE_PEN,
                 _ => i::INFO,
             };
-            tile(0x3A4152).child(icon_svg(path, 20., white(0.92))).into_any_element()
+            tile(0x3A4152)
+                .child(icon_svg(path, 20., white(0.92)))
+                .into_any_element()
         }
         IconRef::App(id) => {
-            let palette = [0xD9534F, 0xE67E22, 0xF1C40F, 0x27AE60, 0x16A085, 0x2E86DE, 0x8E44AD, 0xC0392B];
-            let h = id.as_str().bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
-            let letter = item.title.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+            let palette = [
+                0xD9534F, 0xE67E22, 0xF1C40F, 0x27AE60, 0x16A085, 0x2E86DE, 0x8E44AD, 0xC0392B,
+            ];
+            let h = id
+                .as_str()
+                .bytes()
+                .fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
+            let letter = item
+                .title
+                .chars()
+                .next()
+                .map(|c| c.to_uppercase().to_string())
+                .unwrap_or_default();
             tile(palette[h as usize % palette.len()])
                 .text_size(px(18.))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
@@ -289,10 +368,13 @@ fn icon(item: &Item, cx: &gpui::App) -> AnyElement {
 
 /// The file or folder a result is about, if any.
 pub(super) fn panel_path(item: &Item) -> Option<&std::path::Path> {
-    [Some(&item.primary), item.secondary.as_ref()].into_iter().flatten().find_map(|a| match a {
-        Action::OpenPath(p) | Action::RevealPath(p) => Some(p.as_path()),
-        _ => None,
-    })
+    [Some(&item.primary), item.secondary.as_ref()]
+        .into_iter()
+        .flatten()
+        .find_map(|a| match a {
+            Action::OpenPath(p) | Action::RevealPath(p) => Some(p.as_path()),
+            _ => None,
+        })
 }
 
 fn action_panel(panel: &ActionPanel) -> impl IntoElement {
@@ -301,7 +383,11 @@ fn action_panel(panel: &ActionPanel) -> impl IntoElement {
         .iter()
         .map(|a| match a {
             Action::CopyText(t) if *t == panel.item.title => "Copy name".to_string(),
-            Action::CopyText(t) if panel_path(&panel.item).is_some_and(|p| p.display().to_string() == *t) => "Copy path".to_string(),
+            Action::CopyText(t)
+                if panel_path(&panel.item).is_some_and(|p| p.display().to_string() == *t) =>
+            {
+                "Copy path".to_string()
+            }
             a => a.label().to_string(),
         })
         .collect();
@@ -309,7 +395,11 @@ fn action_panel(panel: &ActionPanel) -> impl IntoElement {
 }
 
 /// The Tab panel: a title and actions, the selected one highlighted.
-pub(super) fn panel_view(title: SharedString, labels: Vec<String>, selected: usize) -> impl IntoElement {
+pub(super) fn panel_view(
+    title: SharedString,
+    labels: Vec<String>,
+    selected: usize,
+) -> impl IntoElement {
     div()
         .absolute()
         .right(px(8.))
@@ -330,7 +420,15 @@ pub(super) fn panel_view(title: SharedString, labels: Vec<String>, selected: usi
         .flex()
         .flex_col()
         .gap(px(2.))
-        .child(div().px(px(10.)).py(px(6.)).text_size(px(12.)).text_color(white(0.5)).truncate().child(title))
+        .child(
+            div()
+                .px(px(10.))
+                .py(px(6.))
+                .text_size(px(12.))
+                .text_color(white(0.5))
+                .truncate()
+                .child(title),
+        )
         .children(labels.into_iter().enumerate().map(|(i, label)| {
             div()
                 .px(px(10.))
@@ -352,13 +450,21 @@ pub(super) enum Cap {
 
 /// A Lucide icon (assets.rs), tinted with `color`.
 pub(super) fn icon_svg(path: &'static str, size: f32, color: Hsla) -> gpui::Svg {
-    gpui::svg().path(path).size(px(size)).flex_none().text_color(color)
+    gpui::svg()
+        .path(path)
+        .size(px(size))
+        .flex_none()
+        .text_color(color)
 }
 
 pub(super) fn key_hint(cap: Cap, label: &'static str) -> impl IntoElement {
     let cap_el: AnyElement = match cap {
         Cap::Icon(path) => icon_svg(path, 12., white(0.8)).into_any_element(),
-        Cap::Text(t) => div().text_size(px(11.)).text_color(white(0.75)).child(t).into_any_element(),
+        Cap::Text(t) => div()
+            .text_size(px(11.))
+            .text_color(white(0.75))
+            .child(t)
+            .into_any_element(),
     };
     div()
         .flex()
@@ -386,7 +492,13 @@ pub(super) fn key_hint(cap: Cap, label: &'static str) -> impl IntoElement {
 /// rounded apart at 125%, leaving the square a pixel or two high).
 fn logo_button() -> impl IntoElement {
     let layer = |path: &'static str, color: Hsla| {
-        gpui::svg().path(path).absolute().top_0().left_0().size_full().text_color(color)
+        gpui::svg()
+            .path(path)
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .text_color(color)
     };
     div()
         .relative()

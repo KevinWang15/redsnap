@@ -11,14 +11,14 @@ use redsnap_core::item::LaunchTarget;
 use redsnap_core::providers::apps::AppEntry;
 use windows::Win32::Foundation::SIZE;
 use windows::Win32::Graphics::Gdi::{
-    BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject,
-    GetDIBits, GetObjectW, HGDIOBJ,
+    BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC,
+    DeleteObject, GetDIBits, GetObjectW, HGDIOBJ,
 };
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoTaskMemFree};
 use windows::Win32::UI::Shell::{
-    BHID_EnumItems, FOLDERID_AppsFolder, IEnumShellItems, IShellItem, IShellItemImageFactory, KF_FLAG_DEFAULT,
-    SHCreateItemFromParsingName, SHGetKnownFolderItem, SHGetKnownFolderPath, SIGDN, SIGDN_NORMALDISPLAY,
-    SIGDN_PARENTRELATIVEPARSING, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
+    BHID_EnumItems, FOLDERID_AppsFolder, IEnumShellItems, IShellItem, IShellItemImageFactory,
+    KF_FLAG_DEFAULT, SHCreateItemFromParsingName, SHGetKnownFolderItem, SHGetKnownFolderPath,
+    SIGDN, SIGDN_NORMALDISPLAY, SIGDN_PARENTRELATIVEPARSING, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
 };
 use windows::core::{GUID, HSTRING, PWSTR};
 
@@ -53,15 +53,21 @@ fn resolve_known_folder(id: &str) -> Option<PathBuf> {
 
 /// The file behind a classic app's id, if there is one.
 fn file_of(id: &str) -> Option<PathBuf> {
-    let path = if id.starts_with('{') { resolve_known_folder(id)? } else { PathBuf::from(id) };
+    let path = if id.starts_with('{') {
+        resolve_known_folder(id)?
+    } else {
+        PathBuf::from(id)
+    };
     path.is_absolute().then_some(path)
 }
 
 pub fn scan(_extra: &[PathBuf]) -> Result<Vec<AppEntry>> {
     com();
-    let folder: IShellItem = unsafe { SHGetKnownFolderItem(&FOLDERID_AppsFolder, KF_FLAG_DEFAULT, None) }
-        .context("opening the AppsFolder")?;
-    let items: IEnumShellItems = unsafe { folder.BindToHandler(None, &BHID_EnumItems) }.context("listing apps")?;
+    let folder: IShellItem =
+        unsafe { SHGetKnownFolderItem(&FOLDERID_AppsFolder, KF_FLAG_DEFAULT, None) }
+            .context("opening the AppsFolder")?;
+    let items: IEnumShellItems =
+        unsafe { folder.BindToHandler(None, &BHID_EnumItems) }.context("listing apps")?;
     let mut out = Vec::new();
     loop {
         let mut batch = [None];
@@ -70,7 +76,10 @@ pub fn scan(_extra: &[PathBuf]) -> Result<Vec<AppEntry>> {
             break;
         }
         let Some(item) = batch[0].take() else { break };
-        let (Some(title), Some(id)) = (name(&item, SIGDN_NORMALDISPLAY), name(&item, SIGDN_PARENTRELATIVEPARSING)) else {
+        let (Some(title), Some(id)) = (
+            name(&item, SIGDN_NORMALDISPLAY),
+            name(&item, SIGDN_PARENTRELATIVEPARSING),
+        ) else {
             continue;
         };
         // Web links pinned to Start aren't apps.
@@ -80,7 +89,10 @@ pub fn scan(_extra: &[PathBuf]) -> Result<Vec<AppEntry>> {
         let file = file_of(&id);
         let packaged = id.contains('!');
         let mut aliases = Vec::new();
-        if let Some(stem) = file.as_ref().and_then(|f| f.file_stem()).map(|s| s.to_string_lossy().to_string())
+        if let Some(stem) = file
+            .as_ref()
+            .and_then(|f| f.file_stem())
+            .map(|s| s.to_string_lossy().to_string())
             && !stem.eq_ignore_ascii_case(&title)
         {
             aliases.push(stem);
@@ -110,16 +122,29 @@ pub fn scan(_extra: &[PathBuf]) -> Result<Vec<AppEntry>> {
 /// shell has). Windows hands back premultiplied pixels; those are undone, and
 /// a fully transparent result counts as no icon.
 pub fn icon(target: &LaunchTarget, px: u32) -> Option<(usize, usize, Vec<u8>)> {
-    let LaunchTarget::AppsFolder(id) = target else { return None };
+    let LaunchTarget::AppsFolder(id) = target else {
+        return None;
+    };
     com();
-    let item: IShellItem =
-        unsafe { SHCreateItemFromParsingName(&HSTRING::from(format!("shell:AppsFolder\\{id}")), None) }.ok()?;
+    let item: IShellItem = unsafe {
+        SHCreateItemFromParsingName(&HSTRING::from(format!("shell:AppsFolder\\{id}")), None)
+    }
+    .ok()?;
     let factory: IShellItemImageFactory = windows::core::Interface::cast(&item).ok()?;
-    let size = SIZE { cx: px as i32, cy: px as i32 };
+    let size = SIZE {
+        cx: px as i32,
+        cy: px as i32,
+    };
     let bitmap = unsafe { factory.GetImage(size, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK) }.ok()?;
     let result = (|| {
         let mut bm = BITMAP::default();
-        let got = unsafe { GetObjectW(HGDIOBJ(bitmap.0), size_of::<BITMAP>() as i32, Some(&mut bm as *mut _ as _)) };
+        let got = unsafe {
+            GetObjectW(
+                HGDIOBJ(bitmap.0),
+                size_of::<BITMAP>() as i32,
+                Some(&mut bm as *mut _ as _),
+            )
+        };
         if got == 0 || bm.bmWidth <= 0 || bm.bmHeight <= 0 {
             return None;
         }
@@ -138,7 +163,17 @@ pub fn icon(target: &LaunchTarget, px: u32) -> Option<(usize, usize, Vec<u8>)> {
         };
         let mut px = vec![0u8; w * h * 4];
         let dc = unsafe { CreateCompatibleDC(None) };
-        let lines = unsafe { GetDIBits(dc, bitmap, 0, h as u32, Some(px.as_mut_ptr().cast()), &mut info, DIB_RGB_COLORS) };
+        let lines = unsafe {
+            GetDIBits(
+                dc,
+                bitmap,
+                0,
+                h as u32,
+                Some(px.as_mut_ptr().cast()),
+                &mut info,
+                DIB_RGB_COLORS,
+            )
+        };
         unsafe {
             let _ = DeleteDC(dc);
         }
@@ -151,7 +186,10 @@ pub fn icon(target: &LaunchTarget, px: u32) -> Option<(usize, usize, Vec<u8>)> {
             if a > 0 {
                 any = true;
                 for c in &mut p[..3] {
-                    *c = (*c as u32 * 255 + a / 2).checked_div(a).unwrap_or(0).min(255) as u8;
+                    *c = (*c as u32 * 255 + a / 2)
+                        .checked_div(a)
+                        .unwrap_or(0)
+                        .min(255) as u8;
                 }
             }
         }

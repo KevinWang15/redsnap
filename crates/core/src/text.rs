@@ -7,7 +7,10 @@ use unicode_normalization::char::is_combining_mark;
 /// Lowercase, with accents removed (NFKD, combining marks dropped), so
 /// `Café` and `cafe` compare equal. CJK characters are unchanged.
 pub fn fold(s: &str) -> String {
-    s.nfkd().filter(|c| !is_combining_mark(*c)).flat_map(char::to_lowercase).collect()
+    s.nfkd()
+        .filter(|c| !is_combining_mark(*c))
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 /// Whether `c` is a CJK ideograph (the characters pinyin applies to).
@@ -105,7 +108,10 @@ pub fn word_starts(original: &str, folded: &str) -> Vec<usize> {
 
 /// The first letter of every word: `Visual Studio Code` → `vsc`.
 pub fn acronym(original: &str, folded: &str) -> String {
-    word_starts(original, folded).iter().filter_map(|&i| folded[i..].chars().next()).collect()
+    word_starts(original, folded)
+        .iter()
+        .filter_map(|&i| folded[i..].chars().next())
+        .collect()
 }
 
 #[cfg(test)]

@@ -43,7 +43,11 @@ pub struct AppCatalog {
 impl AppCatalog {
     /// Builds the searchable catalog: drops duplicate keys (the first wins) and
     /// hidden apps, and adds the user's aliases.
-    pub fn build(entries: Vec<AppEntry>, aliases: &BTreeMap<String, Vec<String>>, hidden: &[String]) -> Self {
+    pub fn build(
+        entries: Vec<AppEntry>,
+        aliases: &BTreeMap<String, Vec<String>>,
+        hidden: &[String],
+    ) -> Self {
         let hidden: HashSet<&str> = hidden.iter().map(String::as_str).collect();
         let mut seen = HashSet::new();
         let apps = entries
@@ -53,9 +57,19 @@ impl AppCatalog {
                 if hidden.contains(id.as_str()) || !seen.insert(entry.key.clone()) {
                     return None;
                 }
-                let user = aliases.get(id.as_str()).into_iter().flatten().map(String::as_str);
-                let names = Names::new(&entry.name, entry.aliases.iter().map(String::as_str).chain(user));
-                Some(App { item: Arc::new(item(entry, id)), names })
+                let user = aliases
+                    .get(id.as_str())
+                    .into_iter()
+                    .flatten()
+                    .map(String::as_str);
+                let names = Names::new(
+                    &entry.name,
+                    entry.aliases.iter().map(String::as_str).chain(user),
+                );
+                Some(App {
+                    item: Arc::new(item(entry, id)),
+                    names,
+                })
             })
             .collect();
         AppCatalog { apps }
@@ -111,7 +125,15 @@ impl Provider for AppsProvider {
         let catalog = self.catalog.load();
         if q.is_empty() {
             // The default list: every app, ranked by use.
-            out.extend(catalog.apps.iter().map(|a| Candidate::normal(a.item.clone(), Match { class: MatchClass::Fuzzy, score: 0 })));
+            out.extend(catalog.apps.iter().map(|a| {
+                Candidate::normal(
+                    a.item.clone(),
+                    Match {
+                        class: MatchClass::Fuzzy,
+                        score: 0,
+                    },
+                )
+            }));
             return;
         }
         for app in &catalog.apps {
@@ -143,13 +165,20 @@ mod tests {
         let mut aliases = BTreeMap::new();
         aliases.insert("app:code".to_string(), vec!["editor".to_string()]);
         let catalog = AppCatalog::build(
-            vec![entry("code", "Visual Studio Code"), entry("code", "Code again"), entry("x", "Hidden")],
+            vec![
+                entry("code", "Visual Studio Code"),
+                entry("code", "Code again"),
+                entry("x", "Hidden"),
+            ],
             &aliases,
             &["app:x".to_string()],
         );
         assert_eq!(catalog.len(), 1);
         let q = crate::query::Query::parse("editor", &Default::default());
-        let m = q.prepared.best(&catalog.apps[0].names, &mut crate::matcher::new_matcher()).unwrap();
+        let m = q
+            .prepared
+            .best(&catalog.apps[0].names, &mut crate::matcher::new_matcher())
+            .unwrap();
         assert_eq!(m.class, MatchClass::Exact);
     }
 }

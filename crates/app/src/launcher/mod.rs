@@ -9,8 +9,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
-    AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable, KeyBinding, Window, WindowHandle,
-    actions,
+    AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable, KeyBinding, Window,
+    WindowHandle, actions,
 };
 use redsnap_core::files::{FileRequest, FileResults, Files};
 use redsnap_core::item::{Action, Item};
@@ -25,7 +25,29 @@ use query_field::{QueryChanged, QueryField};
 
 actions!(
     launcher,
-    [SelectNext, SelectPrev, PageDown, PageUp, PreviewDown, PreviewUp, TogglePin, DeleteEntry, Run, RunSecondary, ToggleActions, Dismiss, Run1, Run2, Run3, Run4, Run5, Run6, Run7, Run8, Run9]
+    [
+        SelectNext,
+        SelectPrev,
+        PageDown,
+        PageUp,
+        PreviewDown,
+        PreviewUp,
+        TogglePin,
+        DeleteEntry,
+        Run,
+        RunSecondary,
+        ToggleActions,
+        Dismiss,
+        Run1,
+        Run2,
+        Run3,
+        Run4,
+        Run5,
+        Run6,
+        Run7,
+        Run8,
+        Run9
+    ]
 );
 
 const CONTEXT: &str = "Launcher";
@@ -51,7 +73,15 @@ pub fn bind_keys(cx: &mut gpui::App) {
         KeyBinding::new(secondary!("p"), TogglePin, c),
         // Cmd+Backspace in Finder; Ctrl+Delete elsewhere (Ctrl+Backspace means
         // "delete the previous word" in a text box).
-        KeyBinding::new(if cfg!(target_os = "macos") { "cmd-backspace" } else { "ctrl-delete" }, DeleteEntry, c),
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-backspace"
+            } else {
+                "ctrl-delete"
+            },
+            DeleteEntry,
+            c,
+        ),
         KeyBinding::new("enter", Run, c),
         KeyBinding::new(secondary!("enter"), RunSecondary, c),
         KeyBinding::new("tab", ToggleActions, c),
@@ -119,7 +149,9 @@ pub struct Launcher {
 }
 
 pub fn now_ms() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 impl Launcher {
@@ -133,7 +165,9 @@ impl Launcher {
     ) -> Self {
         let field = cx.new(|cx| QueryField::new("Search apps and commands", cx));
         let subs = vec![
-            cx.subscribe(&field, |this, _, _: &QueryChanged, cx| this.query_changed(cx)),
+            cx.subscribe(&field, |this, _, _: &QueryChanged, cx| {
+                this.query_changed(cx)
+            }),
             // Hide when focus moves elsewhere, but only after the window has
             // had focus since it was shown: right after mapping, X11 (and a
             // slow foreground switch on Windows) reports it inactive first.
@@ -204,13 +238,16 @@ impl Launcher {
         // Files come from another thread: ask (once per request); the answer
         // searches again (`files_arrived`).
         let want = self.files.request(&q);
-        if want.is_some() && want != self.files_asked
+        if want.is_some()
+            && want != self.files_asked
             && let (Some(s), Some(r)) = (&self.file_search, &want)
         {
             s.request(r.clone());
         }
         self.files_asked = want;
-        self.selected = keep.and_then(|id| self.hits.iter().position(|h| h.item.id == id)).unwrap_or(0);
+        self.selected = keep
+            .and_then(|id| self.hits.iter().position(|h| h.item.id == id))
+            .unwrap_or(0);
         self.scroll_to_selected();
         perf::results_ready();
     }
@@ -307,7 +344,6 @@ impl Launcher {
         window.focus(&self.field.focus_handle(cx), cx);
         cx.notify();
     }
-
 
     pub fn hide(&mut self, cx: &mut Context<Self>) {
         if !self.visible {
@@ -413,25 +449,38 @@ impl Launcher {
             return;
         }
         if self.panel.take().is_none()
-            && let Some(hit) = self.hits.get(self.selected).filter(|h| h.item.primary != Action::Nothing)
+            && let Some(hit) = self
+                .hits
+                .get(self.selected)
+                .filter(|h| h.item.primary != Action::Nothing)
         {
             // Built only now, for the one selected item.
             let item = hit.item.clone();
             let mut actions = vec![item.primary.clone()];
             actions.extend(item.secondary.clone());
             let path = view::panel_path(&item).map(|p| Action::CopyText(p.display().to_string()));
-            for copy in [Some(Action::CopyText(item.title.clone())), path].into_iter().flatten() {
+            for copy in [Some(Action::CopyText(item.title.clone())), path]
+                .into_iter()
+                .flatten()
+            {
                 if !actions.contains(&copy) {
                     actions.push(copy);
                 }
             }
-            self.panel = Some(ActionPanel { item, actions, selected: 0 });
+            self.panel = Some(ActionPanel {
+                item,
+                actions,
+                selected: 0,
+            });
         }
         cx.notify();
     }
 
     fn dismiss(&mut self, _: &Dismiss, _: &mut Window, cx: &mut Context<Self>) {
-        if self.panel.take().is_some() || self.confirming.take().is_some() || self.clip.panel.take().is_some() {
+        if self.panel.take().is_some()
+            || self.confirming.take().is_some()
+            || self.clip.panel.take().is_some()
+        {
             cx.notify();
         } else {
             self.hide(cx);
@@ -498,7 +547,10 @@ impl Launcher {
         if let Action::Snippet(id) = action {
             // Typed into the app that was in front, once RedSnap has hidden.
             let target = self.paste_target;
-            let _ = cx.global::<crate::app::Events>().0.unbounded_send(crate::app::Event::InsertSnippet(id, target));
+            let _ = cx
+                .global::<crate::app::Events>()
+                .0
+                .unbounded_send(crate::app::Event::InsertSnippet(id, target));
             return;
         }
         execute::run(action, cx);
@@ -514,7 +566,12 @@ impl Focusable for Launcher {
 /// Shows the window, finished: reset to the default list, place it on the
 /// monitor under the cursor, paint while cloaked, reveal, focus.
 /// Runs as a task so no OS call happens inside a gpui update.
-pub async fn show(handle: WindowHandle<Launcher>, started: Instant, clipboard: bool, cx: &mut AsyncApp) {
+pub async fn show(
+    handle: WindowHandle<Launcher>,
+    started: Instant,
+    clipboard: bool,
+    cx: &mut AsyncApp,
+) {
     perf::show_started(started);
     // Before RedSnap takes the foreground: where Enter in the clipboard view pastes.
     let target = redsnap_platform::clipboard::foreground();
@@ -527,7 +584,9 @@ pub async fn show(handle: WindowHandle<Launcher>, started: Instant, clipboard: b
     let Ok((native, opts)) = prepared else { return };
     if cfg!(target_os = "macos") {
         cx.update(|cx| cx.activate(true));
-        handle.update(cx, |_, window, _| window.activate_window()).ok();
+        handle
+            .update(cx, |_, window, _| window.activate_window())
+            .ok();
         return;
     }
     let Some(n) = native else { return };
@@ -541,6 +600,8 @@ pub async fn show(handle: WindowHandle<Launcher>, started: Instant, clipboard: b
     // own activate replays creation bounds and injects a fake Alt keypress.
     os::take_focus(n);
     if !cfg!(windows) {
-        handle.update(cx, |_, window, _| window.activate_window()).ok();
+        handle
+            .update(cx, |_, window, _| window.activate_window())
+            .ok();
     }
 }

@@ -33,7 +33,11 @@ pub enum Content {
     /// Plain text, with the HTML the source app also offered.
     Text { text: String, html: Option<String> },
     /// A PNG (images are stored as PNG whatever format they were copied in).
-    Image { png: Vec<u8>, width: u32, height: u32 },
+    Image {
+        png: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
     /// Files copied in Explorer / Finder / a file manager.
     Files(Vec<PathBuf>),
 }
@@ -62,14 +66,22 @@ impl Content {
             Content::Text { text, .. } => format!("t:{text}"),
             Content::Image { png, .. } => format!("i:{:016x}", fnv(png)),
             Content::Files(f) => {
-                format!("f:{}", f.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join("\u{1}"))
+                format!(
+                    "f:{}",
+                    f.iter()
+                        .map(|p| p.to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join("\u{1}")
+                )
             }
         }
     }
 }
 
 fn fnv(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3))
+    bytes.iter().fold(0xcbf29ce484222325u64, |h, b| {
+        (h ^ *b as u64).wrapping_mul(0x100000001b3)
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -107,14 +119,18 @@ pub enum Skip {
     /// The source app marked it private (a password manager, say); names the marker.
     Private(String),
     ExcludedApp,
-    TooLarge { bytes: u64 },
+    TooLarge {
+        bytes: u64,
+    },
     Whitespace,
     /// Nothing RedSnap can keep (only formats it doesn't read); lists them.
     Unsupported(String),
     /// The clipboard couldn't be read in time (another app held it).
     Unreadable(String),
     /// Copies that were replaced before they could be read (macOS polling).
-    Replaced { count: u64 },
+    Replaced {
+        count: u64,
+    },
 }
 
 impl Skip {
@@ -127,7 +143,11 @@ impl Skip {
             Skip::Unsupported(formats) => format!("no text, image or files in it ({formats})"),
             Skip::Unreadable(why) => format!("couldn't be read: {why}"),
             Skip::Replaced { count } => {
-                format!("{count} cop{} replaced before {} could be read", if *count == 1 { "y" } else { "ies" }, if *count == 1 { "it" } else { "they" })
+                format!(
+                    "{count} cop{} replaced before {} could be read",
+                    if *count == 1 { "y" } else { "ies" },
+                    if *count == 1 { "it" } else { "they" }
+                )
             }
         }
     }
@@ -160,7 +180,12 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
-        Limits { max_text_bytes: 4 << 20, max_image_bytes: 64 << 20, keep_days: 30, max_entries: 5000 }
+        Limits {
+            max_text_bytes: 4 << 20,
+            max_image_bytes: 64 << 20,
+            keep_days: 30,
+            max_entries: 5000,
+        }
     }
 }
 
@@ -209,7 +234,11 @@ pub struct Found {
 /// `img: cat` → (Images, "cat").
 pub fn parse_query(q: &str) -> (Filter, &str) {
     let t = q.trim_start();
-    for (prefix, f) in [("img:", Filter::Images), ("file:", Filter::Files), ("url:", Filter::Urls)] {
+    for (prefix, f) in [
+        ("img:", Filter::Images),
+        ("file:", Filter::Files),
+        ("url:", Filter::Urls),
+    ] {
         if let Some(rest) = t.strip_prefix(prefix) {
             return (f, rest.trim_start());
         }
@@ -224,7 +253,10 @@ impl History {
     /// reason or app, and only if `show_skipped`.
     pub fn search(&self, query: &str, show_skipped: bool, limit: usize) -> Vec<Found> {
         let (filter, rest) = parse_query(query);
-        let words: Vec<String> = text::fold(rest).split_whitespace().map(str::to_string).collect();
+        let words: Vec<String> = text::fold(rest)
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
         let mut out = Vec::new();
         let mut push = |i: usize, e: &Entry| {
             let ok_kind = match filter {
@@ -237,8 +269,14 @@ impl History {
                 return;
             }
             let app = e.source_app.as_deref().map(text::fold).unwrap_or_default();
-            if words.iter().all(|w| e.folded.contains(w.as_str()) || app.contains(w.as_str())) {
-                out.push(Found { index: i, highlights: highlights(&e.text, &words) });
+            if words
+                .iter()
+                .all(|w| e.folded.contains(w.as_str()) || app.contains(w.as_str()))
+            {
+                out.push(Found {
+                    index: i,
+                    highlights: highlights(&e.text, &words),
+                });
             }
         };
         if words.is_empty() {
@@ -296,14 +334,28 @@ fn floor_char(s: &str, mut i: usize) -> usize {
 }
 
 enum Cmd {
-    Add { capture: Capture, source_app: Option<String>, at: i64, reply: Option<mpsc::Sender<Outcome>> },
+    Add {
+        capture: Capture,
+        source_app: Option<String>,
+        at: i64,
+        reply: Option<mpsc::Sender<Outcome>>,
+    },
     /// RedSnap pasted an entry: it moves to the top.
-    Touch { id: String, at: i64 },
+    Touch {
+        id: String,
+        at: i64,
+    },
     Delete(String),
-    Pin { id: String, pinned: bool },
+    Pin {
+        id: String,
+        pinned: bool,
+    },
     /// Removes everything but pinned entries.
     Clear,
-    Fetch { id: String, reply: mpsc::Sender<Option<Content>> },
+    Fetch {
+        id: String,
+        reply: mpsc::Sender<Option<Content>>,
+    },
     Flush(mpsc::Sender<()>),
 }
 
@@ -330,7 +382,9 @@ impl ClipStore {
         let history = Arc::new(ArcSwap::from_pointee(load(&conn)?));
         let (tx, rx) = mpsc::channel();
         let shared = history.clone();
-        thread::Builder::new().name("clipboard-store".into()).spawn(move || run(conn, rx, shared, limits))?;
+        thread::Builder::new()
+            .name("clipboard-store".into())
+            .spawn(move || run(conn, rx, shared, limits))?;
         Ok(ClipStore { tx, history })
     }
 
@@ -340,13 +394,30 @@ impl ClipStore {
 
     /// Records a capture. Never blocks on the database.
     pub fn add(&self, capture: Capture, source_app: Option<String>, at: i64) {
-        let _ = self.tx.send(Cmd::Add { capture, source_app, at, reply: None });
+        let _ = self.tx.send(Cmd::Add {
+            capture,
+            source_app,
+            at,
+            reply: None,
+        });
     }
 
     /// Records a capture and waits for the outcome (tests, the debug log).
-    pub fn add_wait(&self, capture: Capture, source_app: Option<String>, at: i64) -> Option<Outcome> {
+    pub fn add_wait(
+        &self,
+        capture: Capture,
+        source_app: Option<String>,
+        at: i64,
+    ) -> Option<Outcome> {
         let (reply, rx) = mpsc::channel();
-        self.tx.send(Cmd::Add { capture, source_app, at, reply: Some(reply) }).ok()?;
+        self.tx
+            .send(Cmd::Add {
+                capture,
+                source_app,
+                at,
+                reply: Some(reply),
+            })
+            .ok()?;
         rx.recv().ok()
     }
 
@@ -359,7 +430,10 @@ impl ClipStore {
     }
 
     pub fn pin(&self, id: &str, pinned: bool) {
-        let _ = self.tx.send(Cmd::Pin { id: id.into(), pinned });
+        let _ = self.tx.send(Cmd::Pin {
+            id: id.into(),
+            pinned,
+        });
     }
 
     pub fn clear(&self) {
@@ -370,7 +444,12 @@ impl ClipStore {
     /// UI thread.
     pub fn fetch(&self, id: &str) -> Option<Content> {
         let (reply, rx) = mpsc::channel();
-        self.tx.send(Cmd::Fetch { id: id.into(), reply }).ok()?;
+        self.tx
+            .send(Cmd::Fetch {
+                id: id.into(),
+                reply,
+            })
+            .ok()?;
         rx.recv().ok().flatten()
     }
 
@@ -389,7 +468,11 @@ fn new_id() -> String {
     let mut out = String::new();
     for _ in 0..2 {
         let mut h = RandomState::new().build_hasher();
-        h.write_u64(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64));
+        h.write_u64(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos() as u64),
+        );
         out.push_str(&format!("{:016x}", h.finish()));
     }
     out
@@ -447,8 +530,12 @@ fn entry_from_row(r: &rusqlite::Row) -> rusqlite::Result<Entry> {
 const COLUMNS: &str = "id, kind, created_at, last_copied_at, source_app, pinned, text, size_bytes, image_width, image_height";
 
 fn load(conn: &Connection) -> Result<History> {
-    let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM clip ORDER BY last_copied_at DESC, created_at DESC"))?;
-    let entries = stmt.query_map([], entry_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM clip ORDER BY last_copied_at DESC, created_at DESC"
+    ))?;
+    let entries = stmt
+        .query_map([], entry_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(History { entries })
 }
 
@@ -456,26 +543,42 @@ fn list_text(content: &Content) -> String {
     match content {
         Content::Text { text, .. } => text.clone(),
         Content::Image { width, height, .. } => format!("Image {width}×{height}"),
-        Content::Files(f) => f.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n"),
+        Content::Files(f) => f
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
     }
 }
 
 /// Applies the size and whitespace rules: what is kept, or why not.
 fn check(capture: Capture, limits: &Limits) -> Capture {
-    let Capture::Content(content) = capture else { return capture };
+    let Capture::Content(content) = capture else {
+        return capture;
+    };
     match &content {
         Content::Text { text, .. } if text.trim().is_empty() => Capture::Skipped(Skip::Whitespace),
         Content::Text { .. } if content.size() > limits.max_text_bytes => {
-            Capture::Skipped(Skip::TooLarge { bytes: content.size() as u64 })
+            Capture::Skipped(Skip::TooLarge {
+                bytes: content.size() as u64,
+            })
         }
         Content::Image { png, .. } if png.len() > limits.max_image_bytes => {
-            Capture::Skipped(Skip::TooLarge { bytes: png.len() as u64 })
+            Capture::Skipped(Skip::TooLarge {
+                bytes: png.len() as u64,
+            })
         }
         _ => Capture::Content(content),
     }
 }
 
-fn add(conn: &mut Connection, capture: Capture, source_app: Option<String>, at: i64, limits: &Limits) -> Result<Outcome> {
+fn add(
+    conn: &mut Connection,
+    capture: Capture,
+    source_app: Option<String>,
+    at: i64,
+    limits: &Limits,
+) -> Result<Outcome> {
     let tx = conn.transaction()?;
     let outcome = match check(capture, limits) {
         Capture::Skipped(skip) => {
@@ -489,8 +592,13 @@ fn add(conn: &mut Connection, capture: Capture, source_app: Option<String>, at: 
         }
         Capture::Content(content) => {
             let key = content.dedup_key();
-            let existing: Option<String> =
-                tx.query_row("SELECT id FROM clip WHERE dedup_key = ?1", params![key], |r| r.get(0)).optional()?;
+            let existing: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM clip WHERE dedup_key = ?1",
+                    params![key],
+                    |r| r.get(0),
+                )
+                .optional()?;
             match existing {
                 Some(id) => {
                     tx.execute(
@@ -503,8 +611,12 @@ fn add(conn: &mut Connection, capture: Capture, source_app: Option<String>, at: 
                     let id = new_id();
                     let (html, png, w, h, files) = match &content {
                         Content::Text { html, .. } => (html.clone(), None, None, None, None),
-                        Content::Image { png, width, height } => (None, Some(png.clone()), Some(*width), Some(*height), None),
-                        Content::Files(f) => (None, None, None, None, Some(serde_json::to_string(f)?)),
+                        Content::Image { png, width, height } => {
+                            (None, Some(png.clone()), Some(*width), Some(*height), None)
+                        }
+                        Content::Files(f) => {
+                            (None, None, None, None, Some(serde_json::to_string(f)?))
+                        }
                     };
                     tx.execute(
                         "INSERT INTO clip (id, kind, dedup_key, created_at, last_copied_at, source_app, text, html,
@@ -576,14 +688,24 @@ fn fetch(conn: &Connection, id: &str) -> Result<Option<Content>> {
     .map_err(Into::into)
 }
 
-fn run(mut conn: Connection, rx: mpsc::Receiver<Cmd>, history: Arc<ArcSwap<History>>, limits: Limits) {
+fn run(
+    mut conn: Connection,
+    rx: mpsc::Receiver<Cmd>,
+    history: Arc<ArcSwap<History>>,
+    limits: Limits,
+) {
     let reload = |conn: &Connection| match load(conn) {
         Ok(h) => history.store(Arc::new(h)),
         Err(e) => log::warn!("reloading clipboard history: {e:#}"),
     };
     for cmd in rx {
         match cmd {
-            Cmd::Add { capture, source_app, at, reply } => match add(&mut conn, capture, source_app, at, &limits) {
+            Cmd::Add {
+                capture,
+                source_app,
+                at,
+                reply,
+            } => match add(&mut conn, capture, source_app, at, &limits) {
                 Ok(outcome) => {
                     log::debug!("clipboard: {outcome:?}");
                     reload(&conn);
@@ -594,22 +716,40 @@ fn run(mut conn: Connection, rx: mpsc::Receiver<Cmd>, history: Arc<ArcSwap<Histo
                 Err(e) => log::warn!("saving a clipboard entry failed: {e:#}"),
             },
             Cmd::Touch { id, at } => {
-                if conn.execute("UPDATE clip SET last_copied_at = MAX(last_copied_at, ?2) WHERE id = ?1", params![id, at]).is_ok() {
+                if conn
+                    .execute(
+                        "UPDATE clip SET last_copied_at = MAX(last_copied_at, ?2) WHERE id = ?1",
+                        params![id, at],
+                    )
+                    .is_ok()
+                {
                     reload(&conn);
                 }
             }
             Cmd::Delete(id) => {
-                if conn.execute("DELETE FROM clip WHERE id = ?1", params![id]).is_ok() {
+                if conn
+                    .execute("DELETE FROM clip WHERE id = ?1", params![id])
+                    .is_ok()
+                {
                     reload(&conn);
                 }
             }
             Cmd::Pin { id, pinned } => {
-                if conn.execute("UPDATE clip SET pinned = ?2 WHERE id = ?1", params![id, pinned as i64]).is_ok() {
+                if conn
+                    .execute(
+                        "UPDATE clip SET pinned = ?2 WHERE id = ?1",
+                        params![id, pinned as i64],
+                    )
+                    .is_ok()
+                {
                     reload(&conn);
                 }
             }
             Cmd::Clear => {
-                if conn.execute("DELETE FROM clip WHERE pinned = 0", []).is_ok() {
+                if conn
+                    .execute("DELETE FROM clip WHERE pinned = 0", [])
+                    .is_ok()
+                {
                     reload(&conn);
                 }
             }
@@ -639,17 +779,32 @@ mod tests {
     }
 
     fn text(t: &str) -> Capture {
-        Capture::Content(Content::Text { text: t.into(), html: None })
+        Capture::Content(Content::Text {
+            text: t.into(),
+            html: None,
+        })
     }
 
     #[test]
     fn every_copy_is_accounted_for() {
         let (_d, s) = store();
-        assert!(matches!(s.add_wait(text("hello"), Some("Notepad".into()), NOW), Some(Outcome::Added(_))));
-        assert!(matches!(s.add_wait(text("world"), None, NOW + 1), Some(Outcome::Added(_))));
+        assert!(matches!(
+            s.add_wait(text("hello"), Some("Notepad".into()), NOW),
+            Some(Outcome::Added(_))
+        ));
+        assert!(matches!(
+            s.add_wait(text("world"), None, NOW + 1),
+            Some(Outcome::Added(_))
+        ));
         // The same text again moves it to the top instead of adding a row.
-        assert!(matches!(s.add_wait(text("hello"), None, NOW + 2), Some(Outcome::Duplicate(_))));
-        assert!(matches!(s.add_wait(text("   \n"), None, NOW + 3), Some(Outcome::Skipped(_))));
+        assert!(matches!(
+            s.add_wait(text("hello"), None, NOW + 2),
+            Some(Outcome::Duplicate(_))
+        ));
+        assert!(matches!(
+            s.add_wait(text("   \n"), None, NOW + 3),
+            Some(Outcome::Skipped(_))
+        ));
         let h = s.history();
         let texts: Vec<&str> = h.entries.iter().map(|e| e.text.as_str()).collect();
         assert_eq!(texts, ["only spaces or line breaks", "hello", "world"]);
@@ -660,11 +815,24 @@ mod tests {
     #[test]
     fn search_is_literal() {
         let (_d, s) = store();
-        for (i, t) in ["the quick brown fox", "quicksort in rust", "brown bear", "Café au lait"].iter().enumerate() {
+        for (i, t) in [
+            "the quick brown fox",
+            "quicksort in rust",
+            "brown bear",
+            "Café au lait",
+        ]
+        .iter()
+        .enumerate()
+        {
             s.add_wait(text(t), None, NOW + i as i64);
         }
         let h = s.history();
-        let found = |q: &str| h.search(q, false, 50).iter().map(|f| h.entries[f.index].text.clone()).collect::<Vec<_>>();
+        let found = |q: &str| {
+            h.search(q, false, 50)
+                .iter()
+                .map(|f| h.entries[f.index].text.clone())
+                .collect::<Vec<_>>()
+        };
         assert_eq!(found("quick"), ["quicksort in rust", "the quick brown fox"]);
         assert_eq!(found("brown quick"), ["the quick brown fox"]);
         // Scattered letters don't match: q-k-f is in "quick fox" but isn't a word.
@@ -672,14 +840,23 @@ mod tests {
         assert_eq!(found("cafe"), ["Café au lait"]);
         assert_eq!(found("").len(), 4);
         let hit = &h.search("rust", false, 1)[0];
-        assert_eq!(&h.entries[hit.index].text[hit.highlights[0].clone()], "rust");
+        assert_eq!(
+            &h.entries[hit.index].text[hit.highlights[0].clone()],
+            "rust"
+        );
     }
 
     #[test]
     fn skipped_entries_follow_the_setting() {
         let (_d, s) = store();
         s.add_wait(text("kept"), None, NOW);
-        s.add_wait(Capture::Skipped(Skip::Private("ExcludeClipboardContentFromMonitorProcessing".into())), Some("KeePassXC".into()), NOW + 1);
+        s.add_wait(
+            Capture::Skipped(Skip::Private(
+                "ExcludeClipboardContentFromMonitorProcessing".into(),
+            )),
+            Some("KeePassXC".into()),
+            NOW + 1,
+        );
         let h = s.history();
         assert_eq!(h.search("", false, 10).len(), 1);
         assert_eq!(h.search("", true, 10).len(), 2);
@@ -689,12 +866,24 @@ mod tests {
     #[test]
     fn images_and_files_round_trip_and_dedupe() {
         let (_d, s) = store();
-        let img = Content::Image { png: vec![1, 2, 3], width: 2, height: 1 };
-        let Some(Outcome::Added(id)) = s.add_wait(Capture::Content(img.clone()), None, NOW) else { panic!() };
-        assert!(matches!(s.add_wait(Capture::Content(img.clone()), None, NOW + 1), Some(Outcome::Duplicate(_))));
+        let img = Content::Image {
+            png: vec![1, 2, 3],
+            width: 2,
+            height: 1,
+        };
+        let Some(Outcome::Added(id)) = s.add_wait(Capture::Content(img.clone()), None, NOW) else {
+            panic!()
+        };
+        assert!(matches!(
+            s.add_wait(Capture::Content(img.clone()), None, NOW + 1),
+            Some(Outcome::Duplicate(_))
+        ));
         assert_eq!(s.fetch(&id), Some(img));
         let files = Content::Files(vec!["/tmp/a.txt".into(), "/tmp/b.png".into()]);
-        let Some(Outcome::Added(fid)) = s.add_wait(Capture::Content(files.clone()), None, NOW + 2) else { panic!() };
+        let Some(Outcome::Added(fid)) = s.add_wait(Capture::Content(files.clone()), None, NOW + 2)
+        else {
+            panic!()
+        };
         assert_eq!(s.fetch(&fid), Some(files));
         let h = s.history();
         assert_eq!(h.search("file: b.png", false, 10).len(), 1);
@@ -704,9 +893,14 @@ mod tests {
     #[test]
     fn retention_keeps_pinned_entries() {
         let dir = tempfile::tempdir().unwrap();
-        let limits = Limits { max_entries: 2, ..Limits::default() };
+        let limits = Limits {
+            max_entries: 2,
+            ..Limits::default()
+        };
         let s = ClipStore::open(&dir.path().join("c.db"), limits).unwrap();
-        let Some(Outcome::Added(first)) = s.add_wait(text("one"), None, NOW) else { panic!() };
+        let Some(Outcome::Added(first)) = s.add_wait(text("one"), None, NOW) else {
+            panic!()
+        };
         s.pin(&first, true);
         for (i, t) in ["two", "three", "four"].iter().enumerate() {
             s.add_wait(text(t), None, NOW + 1 + i as i64);
@@ -722,7 +916,10 @@ mod tests {
     #[test]
     fn too_large_is_skipped_with_the_size() {
         let dir = tempfile::tempdir().unwrap();
-        let limits = Limits { max_text_bytes: 10, ..Limits::default() };
+        let limits = Limits {
+            max_text_bytes: 10,
+            ..Limits::default()
+        };
         let s = ClipStore::open(&dir.path().join("c.db"), limits).unwrap();
         s.add_wait(text("this is longer than ten bytes"), None, NOW);
         assert_eq!(s.history().entries[0].text, "too large (29 B)");

@@ -23,15 +23,16 @@ use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Input::Ime::ImmGetDefaultIMEWnd;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, GetKeyboardLayout, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
-    SendInput, ToUnicodeEx, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_LEFT, VK_LMENU, VK_LWIN, VK_MENU, VK_RCONTROL, VK_RETURN,
-    VK_RMENU, VK_RWIN, VK_SHIFT, VK_TAB,
+    GetKeyState, GetKeyboardLayout, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+    KEYEVENTF_UNICODE, SendInput, ToUnicodeEx, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_LEFT, VK_LMENU,
+    VK_LWIN, VK_MENU, VK_RCONTROL, VK_RETURN, VK_RMENU, VK_RWIN, VK_SHIFT, VK_TAB,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GUITHREADINFO, GWL_STYLE, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo,
-    GetMessageW, GetWindowLongPtrW, GetWindowThreadProcessId, KBDLLHOOKSTRUCT, MSG, SMTO_ABORTIFHUNG,
-    SendMessageTimeoutW, SetWindowsHookExW, TranslateMessage, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP,
-    WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CallNextHookEx, DispatchMessageW, GUITHREADINFO, GWL_STYLE, GetClassNameW, GetForegroundWindow,
+    GetGUIThreadInfo, GetMessageW, GetWindowLongPtrW, GetWindowThreadProcessId, KBDLLHOOKSTRUCT,
+    MSG, SMTO_ABORTIFHUNG, SendMessageTimeoutW, SetWindowsHookExW, TranslateMessage,
+    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
+    WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 use super::ExpanderConfig;
@@ -47,7 +48,11 @@ const IMC_GETOPENSTATUS: usize = 0x0005;
 const IME_CMODE_NATIVE: usize = 0x0001;
 
 enum Ev {
-    Key { vk: u32, scan: u32, down: bool },
+    Key {
+        vk: u32,
+        scan: u32,
+        down: bool,
+    },
     /// A click: whatever was typed may no longer be where the caret is.
     Click,
 }
@@ -63,7 +68,11 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
             let down = matches!(wparam as u32, WM_KEYDOWN | WM_SYSKEYDOWN);
             let up = matches!(wparam as u32, WM_KEYUP | WM_SYSKEYUP);
             if down || up {
-                let _ = tx.send(Ev::Key { vk: k.vkCode, scan: k.scanCode, down });
+                let _ = tx.send(Ev::Key {
+                    vk: k.vkCode,
+                    scan: k.scanCode,
+                    down,
+                });
             }
         }
     }
@@ -72,7 +81,10 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
 
 unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code >= 0
-        && matches!(wparam as u32, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN)
+        && matches!(
+            wparam as u32,
+            WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN
+        )
         && let Some(tx) = EVENTS.get()
     {
         let _ = tx.send(Ev::Click);
@@ -92,25 +104,31 @@ impl Expander {
         }
         let config = Arc::new(ArcSwap::from_pointee(config));
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
-        thread::Builder::new().name("snippet-hooks".into()).spawn(move || unsafe {
-            let module = GetModuleHandleW(std::ptr::null());
-            let kb = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), module, 0);
-            let mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), module, 0);
-            if kb.is_null() || mouse.is_null() {
-                let _ = ready_tx.send(Err("couldn't watch the keyboard (SetWindowsHookEx failed)".into()));
-                return;
-            }
-            let _ = ready_tx.send(Ok(()));
-            // Low-level hooks run on this thread's message loop.
-            let mut msg: MSG = std::mem::zeroed();
-            while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
-                TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
-        })?;
+        thread::Builder::new()
+            .name("snippet-hooks".into())
+            .spawn(move || unsafe {
+                let module = GetModuleHandleW(std::ptr::null());
+                let kb = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), module, 0);
+                let mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), module, 0);
+                if kb.is_null() || mouse.is_null() {
+                    let _ = ready_tx.send(Err(
+                        "couldn't watch the keyboard (SetWindowsHookEx failed)".into(),
+                    ));
+                    return;
+                }
+                let _ = ready_tx.send(Ok(()));
+                // Low-level hooks run on this thread's message loop.
+                let mut msg: MSG = std::mem::zeroed();
+                while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            })?;
         ready_rx.recv()?.map_err(anyhow::Error::msg)?;
         let shared = config.clone();
-        thread::Builder::new().name("snippet-worker".into()).spawn(move || run(rx, shared))?;
+        thread::Builder::new()
+            .name("snippet-worker".into())
+            .spawn(move || run(rx, shared))?;
         Ok(Expander { config })
     }
 
@@ -183,15 +201,22 @@ fn run(rx: mpsc::Receiver<Ev>, config: Arc<ArcSwap<ExpanderConfig>>) {
             typed.reset();
             continue;
         };
-        let Some(found) = typed.push(c, &cfg.triggers) else { continue };
-        let Some(template) = cfg.templates.get(&found.snippet_id) else { continue };
+        let Some(found) = typed.push(c, &cfg.triggers) else {
+            continue;
+        };
+        let Some(template) = cfg.templates.get(&found.snippet_id) else {
+            continue;
+        };
         if let Some(why) = blocked(window as HWND, &cfg.excluded_apps) {
             log::debug!("snippet {} not expanded: {why}", found.snippet_id);
             continue;
         }
         let rendered = core::render(
             template,
-            &core::Context { now: chrono::Local::now(), clipboard: crate::clipboard::windows::current_text() },
+            &core::Context {
+                now: chrono::Local::now(),
+                clipboard: crate::clipboard::windows::current_text(),
+            },
         );
         if let Err(e) = send(found.erase, &rendered.text, rendered.cursor_back) {
             log::warn!("expanding a snippet: {e:#}");
@@ -215,7 +240,15 @@ fn decode(vk: u32, scan: u32, shift: bool, window: HWND) -> Option<char> {
         let mut buf = [0u16; 8];
         // Flag 4: don't change the keyboard state (keeps dead keys working
         // in the app the user is typing in).
-        let n = ToUnicodeEx(vk, scan, state.as_ptr(), buf.as_mut_ptr(), buf.len() as i32, 4, layout);
+        let n = ToUnicodeEx(
+            vk,
+            scan,
+            state.as_ptr(),
+            buf.as_mut_ptr(),
+            buf.len() as i32,
+            4,
+            layout,
+        );
         if n != 1 {
             return None;
         }
@@ -228,7 +261,10 @@ fn blocked(window: HWND, excluded: &[String]) -> Option<&'static str> {
     unsafe {
         if let Some(app) = crate::clipboard::windows::exe_name_of_window(window) {
             let app = app.to_lowercase();
-            if excluded.iter().any(|x| app == *x || app.trim_end_matches(".exe") == x.trim_end_matches(".exe")) {
+            if excluded
+                .iter()
+                .any(|x| app == *x || app.trim_end_matches(".exe") == x.trim_end_matches(".exe"))
+            {
                 return Some("excluded app");
             }
         }
@@ -240,16 +276,30 @@ fn blocked(window: HWND, excluded: &[String]) -> Option<&'static str> {
             let mut class = [0u16; 32];
             let n = GetClassNameW(gui.hwndFocus, class.as_mut_ptr(), class.len() as i32);
             let class = String::from_utf16_lossy(&class[..n.max(0) as usize]);
-            if class.eq_ignore_ascii_case("Edit") && GetWindowLongPtrW(gui.hwndFocus, GWL_STYLE) & ES_PASSWORD != 0 {
+            if class.eq_ignore_ascii_case("Edit")
+                && GetWindowLongPtrW(gui.hwndFocus, GWL_STYLE) & ES_PASSWORD != 0
+            {
                 return Some("password field");
             }
         }
         // An IME in native mode: letters are being composed, not typed.
-        let ime = ImmGetDefaultIMEWnd(if gui.hwndFocus.is_null() { window } else { gui.hwndFocus });
+        let ime = ImmGetDefaultIMEWnd(if gui.hwndFocus.is_null() {
+            window
+        } else {
+            gui.hwndFocus
+        });
         if !ime.is_null() {
             let query = |what: usize| {
                 let mut result: usize = 0;
-                let ok = SendMessageTimeoutW(ime, WM_IME_CONTROL, what, 0, SMTO_ABORTIFHUNG, 50, &mut result);
+                let ok = SendMessageTimeoutW(
+                    ime,
+                    WM_IME_CONTROL,
+                    what,
+                    0,
+                    SMTO_ABORTIFHUNG,
+                    50,
+                    &mut result,
+                );
                 (ok != 0).then_some(result)
             };
             if query(IMC_GETOPENSTATUS).is_some_and(|open| open != 0)
@@ -266,7 +316,13 @@ fn key(vk: u16, up: bool) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
-            ki: KEYBDINPUT { wVk: vk, wScan: 0, dwFlags: if up { KEYEVENTF_KEYUP } else { 0 }, time: 0, dwExtraInfo: MARKER },
+            ki: KEYBDINPUT {
+                wVk: vk,
+                wScan: 0,
+                dwFlags: if up { KEYEVENTF_KEYUP } else { 0 },
+                time: 0,
+                dwExtraInfo: MARKER,
+            },
         },
     }
 }
@@ -321,7 +377,13 @@ fn send(erase: usize, text: &str, cursor_back: usize) -> Result<()> {
     if inputs.is_empty() {
         return Ok(());
     }
-    let sent = unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) };
+    let sent = unsafe {
+        SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            size_of::<INPUT>() as i32,
+        )
+    };
     if sent as usize != inputs.len() {
         bail!("Windows accepted {sent} of {} keystrokes", inputs.len());
     }

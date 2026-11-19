@@ -6,9 +6,10 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, Context, Global, HighlightStyle, InteractiveElement, IntoElement, ObjectFit, ParentElement, RenderImage,
-    ListAlignment, ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledImage, StyledText,
-    div, img, list, point, prelude::FluentBuilder, px, rgb, rgba,
+    AnyElement, Context, Global, HighlightStyle, InteractiveElement, IntoElement, ListAlignment,
+    ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement,
+    Pixels, RenderImage, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
+    StyledImage, StyledText, div, img, list, point, prelude::FluentBuilder, px, rgb, rgba,
 };
 use redsnap_core::clipboard::{ClipStore, Content, Entry, Found, History, Kind};
 use redsnap_platform::clipboard::{Target, Watcher};
@@ -75,7 +76,16 @@ fn actions_for(e: &Entry) -> Vec<ClipAction> {
     if e.kind == Kind::Skipped {
         return vec![ClipAction::Delete];
     }
-    vec![ClipAction::Paste, ClipAction::Copy, if e.pinned { ClipAction::Unpin } else { ClipAction::Pin }, ClipAction::Delete]
+    vec![
+        ClipAction::Paste,
+        ClipAction::Copy,
+        if e.pinned {
+            ClipAction::Unpin
+        } else {
+            ClipAction::Pin
+        },
+        ClipAction::Delete,
+    ]
 }
 
 /// The text preview's line height.
@@ -116,7 +126,10 @@ impl Scroller {
         match self {
             Scroller::List(l) => {
                 let item_ix = (y / ROW).floor() as usize;
-                l.scroll_to(gpui::ListOffset { item_ix, offset_in_item: y - ROW * item_ix as f32 });
+                l.scroll_to(gpui::ListOffset {
+                    item_ix,
+                    offset_in_item: y - ROW * item_ix as f32,
+                });
             }
             Scroller::Handle(h) => h.set_offset(point(px(0.), -y)),
         }
@@ -169,7 +182,6 @@ fn line_chunks(text: &str) -> Vec<Range<usize>> {
 
 const LIMIT: usize = 300;
 
-
 fn white(a: f32) -> gpui::Hsla {
     let mut c: gpui::Hsla = rgb(0xFFFFFF).into();
     c.a = a;
@@ -178,7 +190,11 @@ fn white(a: f32) -> gpui::Hsla {
 
 /// The scrollbar thumb's height and top for a viewport `view` tall, content
 /// scrollable by `max`, scrolled `y` down. `None` when nothing scrolls.
-fn scroll_thumb(view: gpui::Pixels, max: gpui::Pixels, y: gpui::Pixels) -> Option<(gpui::Pixels, gpui::Pixels)> {
+fn scroll_thumb(
+    view: gpui::Pixels,
+    max: gpui::Pixels,
+    y: gpui::Pixels,
+) -> Option<(gpui::Pixels, gpui::Pixels)> {
     (max > px(0.) && view > px(0.)).then(|| {
         let h = (view * (view / (view + max))).max(px(24.));
         (h, (view - h) * (y / max).clamp(0., 1.))
@@ -226,16 +242,30 @@ fn highlighted(text: String, ranges: Vec<Range<usize>>) -> StyledText {
 impl Launcher {
     /// Searches the clipboard history for the current query (after `cb `).
     pub(super) fn refresh_clipboard(&mut self, cx: &mut Context<Self>) {
-        let Some(c) = cx.try_global::<Clipboard>() else { return };
-        let keep = self.clip.found.get(self.clip.selected).map(|f| self.clip.history.entries[f.index].id.clone());
+        let Some(c) = cx.try_global::<Clipboard>() else {
+            return;
+        };
+        let keep = self
+            .clip
+            .found
+            .get(self.clip.selected)
+            .map(|f| self.clip.history.entries[f.index].id.clone());
         let history = c.store.history();
         let found = history.search(&self.clip_query(), c.show_skipped, LIMIT);
         self.clip.selected = match self.clip.keep_index.take() {
             Some(i) => i.min(found.len().saturating_sub(1)),
-            None => keep.and_then(|id| found.iter().position(|f| history.entries[f.index].id == id)).unwrap_or(0),
+            None => keep
+                .and_then(|id| found.iter().position(|f| history.entries[f.index].id == id))
+                .unwrap_or(0),
         };
-        if self.clip.found.get(self.clip.selected).map(|f| &self.clip.history.entries[f.index].id)
-            != found.get(self.clip.selected).map(|f| &history.entries[f.index].id)
+        if self
+            .clip
+            .found
+            .get(self.clip.selected)
+            .map(|f| &self.clip.history.entries[f.index].id)
+            != found
+                .get(self.clip.selected)
+                .map(|f| &history.entries[f.index].id)
         {
             self.clip.scroll.set_offset(point(px(0.), px(0.)));
         }
@@ -248,7 +278,15 @@ impl Launcher {
     /// The query without the `cb ` that switched to this view.
     fn clip_query(&self) -> String {
         let q = self.query.trim_start();
-        q.strip_prefix("cb ").map(str::to_string).unwrap_or_else(|| if self.clip_sticky { q.to_string() } else { String::new() })
+        q.strip_prefix("cb ")
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                if self.clip_sticky {
+                    q.to_string()
+                } else {
+                    String::new()
+                }
+            })
     }
 
     pub(super) fn clip_scroll(&mut self) {
@@ -275,12 +313,17 @@ impl Launcher {
     }
 
     fn selected_entry(&self) -> Option<&Entry> {
-        self.clip.found.get(self.clip.selected).map(|f| &self.clip.history.entries[f.index])
+        self.clip
+            .found
+            .get(self.clip.selected)
+            .map(|f| &self.clip.history.entries[f.index])
     }
 
     /// Loads the selected image entry's picture off the UI thread.
     fn load_preview(&mut self, cx: &mut Context<Self>) {
-        let Some(e) = self.selected_entry() else { return };
+        let Some(e) = self.selected_entry() else {
+            return;
+        };
         if e.kind == Kind::Text && self.clip.text.as_ref().is_none_or(|t| t.id != e.id) {
             let found = &self.clip.found[self.clip.selected];
             let chunks = Arc::new(line_chunks(&e.text));
@@ -298,14 +341,25 @@ impl Launcher {
             return;
         }
         let id = e.id.clone();
-        let Some(store) = cx.try_global::<Clipboard>().map(|c| c.store.clone()) else { return };
+        let Some(store) = cx.try_global::<Clipboard>().map(|c| c.store.clone()) else {
+            return;
+        };
         let task = cx.background_executor().spawn(async move {
-            let Some(Content::Image { png, .. }) = store.fetch(&id) else { return None };
-            let mut rgba = image::load_from_memory_with_format(&png, image::ImageFormat::Png).ok()?.into_rgba8();
+            let Some(Content::Image { png, .. }) = store.fetch(&id) else {
+                return None;
+            };
+            let mut rgba = image::load_from_memory_with_format(&png, image::ImageFormat::Png)
+                .ok()?
+                .into_rgba8();
             for p in rgba.as_chunks_mut::<4>().0 {
                 p.swap(0, 2);
             }
-            Some((id, Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(rgba)]))))
+            Some((
+                id,
+                Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(
+                    rgba
+                )])),
+            ))
         });
         cx.spawn(async move |this, cx| {
             if let Some(loaded) = task.await {
@@ -325,9 +379,15 @@ impl Launcher {
     /// while being laid out, so the scrollbar can only be drawn one frame
     /// later.
     pub(super) fn preview_unmeasured(&self) -> bool {
-        let Some(e) = self.selected_entry() else { return false };
+        let Some(e) = self.selected_entry() else {
+            return false;
+        };
         match e.kind {
-            Kind::Text => self.clip.text.as_ref().is_some_and(|t| t.list.viewport_bounds().size.height == px(0.)),
+            Kind::Text => self
+                .clip
+                .text
+                .as_ref()
+                .is_some_and(|t| t.list.viewport_bounds().size.height == px(0.)),
             Kind::Files | Kind::Skipped => self.clip.scroll.bounds().size.height == px(0.),
             Kind::Image => false,
         }
@@ -357,15 +417,23 @@ impl Launcher {
 
     /// Moves within the Tab panel if it's open; `false` otherwise.
     pub(super) fn clip_panel_move(&mut self, to: isize, cx: &mut Context<Self>) -> bool {
-        let Some(n) = self.selected_entry().map(|e| actions_for(e).len()) else { return false };
-        let Some(sel) = &mut self.clip.panel else { return false };
+        let Some(n) = self.selected_entry().map(|e| actions_for(e).len()) else {
+            return false;
+        };
+        let Some(sel) = &mut self.clip.panel else {
+            return false;
+        };
         *sel = to.clamp(0, n as isize - 1) as usize;
         cx.notify();
         true
     }
 
     pub(super) fn clip_toggle_panel(&mut self, cx: &mut Context<Self>) {
-        self.clip.panel = if self.clip.panel.is_some() || self.selected_entry().is_none() { None } else { Some(0) };
+        self.clip.panel = if self.clip.panel.is_some() || self.selected_entry().is_none() {
+            None
+        } else {
+            Some(0)
+        };
         cx.notify();
     }
 
@@ -386,8 +454,14 @@ impl Launcher {
 
     /// Runs `op` on the store, waits for it to commit (off the UI thread), then
     /// shows the new history.
-    fn after_store(&mut self, op: impl FnOnce(&ClipStore) + Send + 'static, cx: &mut Context<Self>) {
-        let Some(store) = cx.try_global::<Clipboard>().map(|c| c.store.clone()) else { return };
+    fn after_store(
+        &mut self,
+        op: impl FnOnce(&ClipStore) + Send + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(store) = cx.try_global::<Clipboard>().map(|c| c.store.clone()) else {
+            return;
+        };
         let done = cx.background_executor().spawn(async move {
             op(&store);
             store.flush();
@@ -406,7 +480,9 @@ impl Launcher {
     /// Ctrl/Cmd+P: pins or unpins the selected entry. Pinned entries stay on
     /// top of the full list and are never removed by retention.
     pub(super) fn clip_pin(&mut self, cx: &mut Context<Self>) {
-        let Some(e) = self.selected_entry() else { return };
+        let Some(e) = self.selected_entry() else {
+            return;
+        };
         let (id, pinned) = (e.id.clone(), !e.pinned);
         self.after_store(move |s| s.pin(&id, pinned), cx);
     }
@@ -414,7 +490,9 @@ impl Launcher {
     /// Ctrl+Delete / Cmd+Backspace: deletes the selected entry; the selection
     /// moves to the next one.
     pub(super) fn clip_delete(&mut self, cx: &mut Context<Self>) {
-        let Some(e) = self.selected_entry() else { return };
+        let Some(e) = self.selected_entry() else {
+            return;
+        };
         let id = e.id.clone();
         self.clip.keep_index = Some(self.clip.selected);
         self.clip.text = None;
@@ -424,19 +502,26 @@ impl Launcher {
     /// Enter: puts the entry on the clipboard and pastes it into the app that
     /// was in front. `paste: false` (Ctrl/Cmd+C) only copies.
     pub(super) fn clip_use(&mut self, paste: bool, cx: &mut Context<Self>) {
-        let Some(e) = self.selected_entry() else { return };
+        let Some(e) = self.selected_entry() else {
+            return;
+        };
         if e.kind == Kind::Skipped {
             return;
         }
         let id = e.id.clone();
-        let Some(c) = cx.try_global::<Clipboard>() else { return };
+        let Some(c) = cx.try_global::<Clipboard>() else {
+            return;
+        };
         let (store, watcher) = (c.store.clone(), c.watcher.clone());
         let target: Option<Target> = if paste { self.paste_target } else { None };
         self.hide(cx);
         std::thread::spawn(move || {
             let result = (|| -> anyhow::Result<()> {
-                let content = store.fetch(&id).ok_or_else(|| anyhow::anyhow!("the entry is gone"))?;
-                let watcher = watcher.ok_or_else(|| anyhow::anyhow!("clipboard capture isn't running"))?;
+                let content = store
+                    .fetch(&id)
+                    .ok_or_else(|| anyhow::anyhow!("the entry is gone"))?;
+                let watcher =
+                    watcher.ok_or_else(|| anyhow::anyhow!("clipboard capture isn't running"))?;
                 watcher.write(&content, &id)?;
                 store.touch(&id, now_ms());
                 if let Some(t) = target {
@@ -453,7 +538,8 @@ impl Launcher {
     /// The left list and the right preview.
     pub(super) fn clip_body(&self, cx: &mut Context<Self>) -> AnyElement {
         let rows = self.opts.rows;
-        let list: Vec<AnyElement> = (self.clip.top..(self.clip.top + rows).min(self.clip.found.len()))
+        let list: Vec<AnyElement> = (self.clip.top
+            ..(self.clip.top + rows).min(self.clip.found.len()))
             .map(|i| self.clip_row(i, cx))
             .collect();
         let empty = self.clip.found.is_empty();
@@ -488,7 +574,10 @@ impl Launcher {
             )
             .child(self.clip_preview(cx))
             .when_some(self.clip.panel.zip(self.selected_entry()), |d, (sel, e)| {
-                let labels = actions_for(e).iter().map(|a| a.label().to_string()).collect();
+                let labels = actions_for(e)
+                    .iter()
+                    .map(|a| a.label().to_string())
+                    .collect();
                 let title: SharedString = first_line(&e.text, &[]).0.into();
                 d.child(super::view::panel_view(title, labels, sel))
             })
@@ -510,12 +599,27 @@ impl Launcher {
             Kind::Files => {
                 let n = e.text.lines().count();
                 let first = e.text.lines().next().unwrap_or("");
-                let name = std::path::Path::new(first).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-                (ic::FILES, if n > 1 { format!("{name} and {} more", n - 1) } else { name }, Vec::new())
+                let name = std::path::Path::new(first)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                (
+                    ic::FILES,
+                    if n > 1 {
+                        format!("{name} and {} more", n - 1)
+                    } else {
+                        name
+                    },
+                    Vec::new(),
+                )
             }
             Kind::Skipped => (ic::BAN, format!("Not kept: {}", e.text), Vec::new()),
         };
-        let app = e.source_app.clone().map(|a| a.trim_end_matches(".exe").to_string()).unwrap_or_else(|| "Unknown app".into());
+        let app = e
+            .source_app
+            .clone()
+            .map(|a| a.trim_end_matches(".exe").to_string())
+            .unwrap_or_else(|| "Unknown app".into());
         let subtitle = format!("{app} · {}", ago(e.last_copied_at));
         let slot = i - self.clip.top;
         div()
@@ -561,7 +665,12 @@ impl Launcher {
                     .flex()
                     .flex_col()
                     .overflow_hidden()
-                    .child(div().text_size(px(15.)).truncate().child(highlighted(title, ranges)))
+                    .child(
+                        div()
+                            .text_size(px(15.))
+                            .truncate()
+                            .child(highlighted(title, ranges)),
+                    )
                     .child(
                         div()
                             .text_size(px(12.))
@@ -570,14 +679,25 @@ impl Launcher {
                             .child(subtitle),
                     ),
             )
-            .when(e.pinned, |d| d.child(super::view::icon_svg(crate::assets::icon::PIN, 15., rgb(0xFFC94D).into())))
+            .when(e.pinned, |d| {
+                d.child(super::view::icon_svg(
+                    crate::assets::icon::PIN,
+                    15.,
+                    rgb(0xFFC94D).into(),
+                ))
+            })
             .into_any_element()
     }
 
     /// The text preview: one row per line (or piece of a long line), laid out
     /// only when scrolled into view, with a thin scrollbar.
     fn text_list(&self, t: &TextPreview, cx: &mut Context<Self>) -> AnyElement {
-        let (history, index, chunks, highlights) = (t.history.clone(), t.index, t.chunks.clone(), t.highlights.clone());
+        let (history, index, chunks, highlights) = (
+            t.history.clone(),
+            t.index,
+            t.chunks.clone(),
+            t.highlights.clone(),
+        );
         let rows = list(t.list.clone(), move |i, _, _| {
             let text = &history.entries[index].text;
             let r = chunks[i].clone();
@@ -602,7 +722,15 @@ impl Launcher {
         div()
             .relative()
             .size_full()
-            .child(div().absolute().top_0().left_0().bottom_0().right(px(14.)).child(rows))
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .bottom_0()
+                    .right(px(14.))
+                    .child(rows),
+            )
             .child(self.scrollbar(Scroller::List(t.list.clone()), cx))
             .into_any_element()
     }
@@ -613,7 +741,15 @@ impl Launcher {
         div()
             .relative()
             .size_full()
-            .child(div().id("clip-preview").size_full().overflow_y_scroll().track_scroll(s).pr(px(14.)).child(content))
+            .child(
+                div()
+                    .id("clip-preview")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .track_scroll(s)
+                    .pr(px(14.))
+                    .child(content),
+            )
             .child(self.scrollbar(Scroller::Handle(s.clone()), cx))
             .into_any_element()
     }
@@ -624,7 +760,9 @@ impl Launcher {
     fn scrollbar(&self, scroller: Scroller, cx: &mut Context<Self>) -> AnyElement {
         let (viewport, max, y) = scroller.metrics();
         let view = viewport.size.height;
-        let Some((h, top)) = scroll_thumb(view, max, y) else { return div().into_any_element() };
+        let Some((h, top)) = scroll_thumb(view, max, y) else {
+            return div().into_any_element();
+        };
         let dragging = self.clip.drag.is_some();
         let ratio = if view > h { max / (view - h) } else { 0. };
         div()
@@ -640,7 +778,12 @@ impl Launcher {
                 cx.listener(move |this, e: &MouseDownEvent, _, cx| {
                     let at = e.position.y - viewport.origin.y;
                     if at >= top && at <= top + h {
-                        this.clip.drag = Some(Drag { scroller: scroller.clone(), grab_y: e.position.y, start: y, ratio });
+                        this.clip.drag = Some(Drag {
+                            scroller: scroller.clone(),
+                            grab_y: e.position.y,
+                            start: y,
+                            ratio,
+                        });
                     } else {
                         // A page toward the click.
                         let page = view * 0.9;
@@ -665,18 +808,29 @@ impl Launcher {
     }
 
     /// While the thumb is held: follow the mouse.
-    pub(super) fn clip_drag_move(&mut self, e: &MouseMoveEvent, _: &mut gpui::Window, cx: &mut Context<Self>) {
+    pub(super) fn clip_drag_move(
+        &mut self,
+        e: &MouseMoveEvent,
+        _: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(d) = &self.clip.drag else { return };
         if e.pressed_button != Some(MouseButton::Left) {
             self.clip.drag = None;
             cx.notify();
             return;
         }
-        d.scroller.scroll_to(d.start + (e.position.y - d.grab_y) * d.ratio);
+        d.scroller
+            .scroll_to(d.start + (e.position.y - d.grab_y) * d.ratio);
         cx.notify();
     }
 
-    pub(super) fn clip_drag_end(&mut self, _: &MouseUpEvent, _: &mut gpui::Window, cx: &mut Context<Self>) {
+    pub(super) fn clip_drag_end(
+        &mut self,
+        _: &MouseUpEvent,
+        _: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.clip.drag.take().is_some() {
             cx.notify();
         }
@@ -693,7 +847,9 @@ impl Launcher {
             .border_1()
             .border_color(white(0.07))
             .overflow_hidden();
-        let Some(found) = self.clip.found.get(self.clip.selected) else { return pane.into_any_element() };
+        let Some(found) = self.clip.found.get(self.clip.selected) else {
+            return pane.into_any_element();
+        };
         let e = &self.clip.history.entries[found.index];
         let body: AnyElement = match e.kind {
             Kind::Image => match &self.clip.image {
@@ -723,18 +879,40 @@ impl Launcher {
             },
         };
         // File lists and skip notes scroll here; text scrolls in its own list.
-        let body = if matches!(e.kind, Kind::Files | Kind::Skipped) { self.scrollable(body, cx) } else { body };
+        let body = if matches!(e.kind, Kind::Files | Kind::Skipped) {
+            self.scrollable(body, cx)
+        } else {
+            body
+        };
         let info = match e.kind {
-            Kind::Image => e.image_size.map(|(w, h)| format!("{w} × {h} · {}", redsnap_core::clipboard::human_bytes(e.size_bytes))),
+            Kind::Image => e.image_size.map(|(w, h)| {
+                format!(
+                    "{w} × {h} · {}",
+                    redsnap_core::clipboard::human_bytes(e.size_bytes)
+                )
+            }),
             Kind::Text => Some(format!("{} characters", e.text.chars().count())),
-            Kind::Files => Some(format!("{} item{}", e.text.lines().count(), if e.text.lines().count() == 1 { "" } else { "s" })),
+            Kind::Files => Some(format!(
+                "{} item{}",
+                e.text.lines().count(),
+                if e.text.lines().count() == 1 { "" } else { "s" }
+            )),
             Kind::Skipped => None,
         };
         pane.flex()
             .flex_col()
             .gap(px(8.))
-            .child(div().relative().flex_1().min_h_0().overflow_hidden().child(body))
-            .when_some(info, |d, info| d.child(div().text_size(px(12.)).text_color(white(0.45)).child(info)))
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(body),
+            )
+            .when_some(info, |d, info| {
+                d.child(div().text_size(px(12.)).text_color(white(0.45)).child(info))
+            })
             .into_any_element()
     }
 }
@@ -751,7 +929,10 @@ mod tests {
         let long = "é".repeat(1500); // 3000 bytes
         let rows = line_chunks(&long);
         assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|r| long.is_char_boundary(r.start) && long.is_char_boundary(r.end)));
+        assert!(
+            rows.iter()
+                .all(|r| long.is_char_boundary(r.start) && long.is_char_boundary(r.end))
+        );
         assert_eq!(rows.last().unwrap().end, long.len());
     }
 }

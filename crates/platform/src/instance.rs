@@ -54,9 +54,19 @@ fn name(data: &Path) -> Result<interprocess::local_socket::Name<'static>> {
     // Pipe names are global; the user and a hash of the data folder keep users
     // (and test or demo profiles) apart.
     let user = std::env::var("USERNAME").unwrap_or_else(|_| "user".into());
-    let safe: String = user.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
-    let hash = data.to_string_lossy().bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
-    Ok(format!("redsnap-{safe}-{:08x}", hash as u32).to_ns_name::<GenericNamespaced>()?.into_owned())
+    let safe: String = user
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect();
+    let hash = data
+        .to_string_lossy()
+        .bytes()
+        .fold(0xcbf29ce484222325u64, |h, b| {
+            (h ^ b as u64).wrapping_mul(0x100000001b3)
+        });
+    Ok(format!("redsnap-{safe}-{:08x}", hash as u32)
+        .to_ns_name::<GenericNamespaced>()?
+        .into_owned())
 }
 
 #[cfg(unix)]
@@ -71,7 +81,9 @@ fn name(data: &Path) -> Result<interprocess::local_socket::Name<'static>> {
 pub fn acquire(data: &Path, on_command: impl Fn(CliCommand) + Send + 'static) -> Result<Acquired> {
     let endpoint = name(data)?;
     if let Ok(stream) = Stream::connect(endpoint.clone()) {
-        return Ok(Acquired::Secondary(Client { stream: BufReader::new(stream) }));
+        return Ok(Acquired::Secondary(Client {
+            stream: BufReader::new(stream),
+        }));
     }
     // Nobody answered: a socket file left by a crash is replaced.
     let listener = ListenerOptions::new()
@@ -79,18 +91,20 @@ pub fn acquire(data: &Path, on_command: impl Fn(CliCommand) + Send + 'static) ->
         .try_overwrite(true)
         .create_sync()
         .context("listening for other RedSnap launches")?;
-    thread::Builder::new().name("instance".into()).spawn(move || {
-        for conn in listener.incoming() {
-            match conn {
-                Ok(conn) => {
-                    if let Err(e) = serve(conn, &on_command) {
-                        log::debug!("instance connection: {e:#}");
+    thread::Builder::new()
+        .name("instance".into())
+        .spawn(move || {
+            for conn in listener.incoming() {
+                match conn {
+                    Ok(conn) => {
+                        if let Err(e) = serve(conn, &on_command) {
+                            log::debug!("instance connection: {e:#}");
+                        }
                     }
+                    Err(e) => log::warn!("instance listener: {e}"),
                 }
-                Err(e) => log::warn!("instance listener: {e}"),
             }
-        }
-    })?;
+        })?;
     Ok(Acquired::Primary)
 }
 
@@ -99,7 +113,10 @@ fn serve(conn: Stream, on_command: &impl Fn(CliCommand)) -> Result<()> {
     let mut line = String::new();
     loop {
         line.clear();
-        let n = reader.by_ref().take(MAX_LINE as u64 + 1).read_line(&mut line)?;
+        let n = reader
+            .by_ref()
+            .take(MAX_LINE as u64 + 1)
+            .read_line(&mut line)?;
         if n == 0 {
             return Ok(());
         }
@@ -137,7 +154,9 @@ impl Client {
         let hello = self.call(&Request::Hello)?;
         #[cfg(windows)]
         if let Some(pid) = hello.get("pid").and_then(|p| p.as_u64()) {
-            unsafe { windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(pid as u32) };
+            unsafe {
+                windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(pid as u32)
+            };
         }
         let _ = hello;
         let reply = self.call(&Request::Cli { command })?;
@@ -155,12 +174,15 @@ mod tests {
 
     #[test]
     fn second_launch_reaches_the_first() {
-        let dir = std::env::temp_dir().join(format!("redsnap-instance-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("redsnap-instance-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (tx, rx) = mpsc::channel();
         let first = acquire(&dir, move |c| tx.send(c).unwrap()).unwrap();
         assert!(matches!(first, Acquired::Primary));
-        let Acquired::Secondary(client) = acquire(&dir, |_| {}).unwrap() else { panic!("expected secondary") };
+        let Acquired::Secondary(client) = acquire(&dir, |_| {}).unwrap() else {
+            panic!("expected secondary")
+        };
         client.send(CliCommand::Toggle).unwrap();
         assert_eq!(rx.recv().unwrap(), CliCommand::Toggle);
         let _ = std::fs::remove_dir_all(&dir);

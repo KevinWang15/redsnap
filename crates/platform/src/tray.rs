@@ -14,7 +14,11 @@ pub enum TrayCommand {
 
 pub type OnCommand = Box<dyn Fn(TrayCommand) + Send + Sync + 'static>;
 
-const LOGIN_LABEL: &str = if cfg!(windows) { "Start with Windows" } else { "Start at login" };
+const LOGIN_LABEL: &str = if cfg!(windows) {
+    "Start with Windows"
+} else {
+    "Start at login"
+};
 
 pub use imp::Tray;
 
@@ -22,7 +26,9 @@ pub use imp::Tray;
 mod imp {
     use super::*;
     use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-    use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+    use tray_icon::{
+        Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
+    };
 
     pub struct Tray {
         _icon: TrayIcon,
@@ -38,7 +44,13 @@ mod imp {
             let login = CheckMenuItem::with_id("login", LOGIN_LABEL, true, start_at_login, None);
             let quit = MenuItem::with_id("quit", "Quit RedSnap", true, None);
             let menu = Menu::new();
-            menu.append_items(&[&open, &settings, &login, &PredefinedMenuItem::separator(), &quit])?;
+            menu.append_items(&[
+                &open,
+                &settings,
+                &login,
+                &PredefinedMenuItem::separator(),
+                &quit,
+            ])?;
             let menu_cb = on_command.clone();
             MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
                 let cmd = match event.id.0.as_str() {
@@ -53,7 +65,11 @@ mod imp {
             // Windows convention: left click opens RedSnap, right click the menu.
             TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
                 if cfg!(windows)
-                    && let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event
+                    && let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
                 {
                     on_command(TrayCommand::Open);
                 }
@@ -61,14 +77,21 @@ mod imp {
             let size = 32;
             // The app icon (mark on a dark tile): the bare white brackets vanish
             // on a light taskbar. macOS menu bars use the bare mark.
-            let rgba = if cfg!(target_os = "macos") { crate::icon::logo_rgba(size) } else { crate::icon::app_icon_rgba(size) };
+            let rgba = if cfg!(target_os = "macos") {
+                crate::icon::logo_rgba(size)
+            } else {
+                crate::icon::app_icon_rgba(size)
+            };
             let icon = Icon::from_rgba(rgba, size, size)?;
             let builder = TrayIconBuilder::new()
                 .with_menu(Box::new(menu))
                 .with_menu_on_left_click(cfg!(target_os = "macos"))
                 .with_tooltip("RedSnap")
                 .with_icon(icon);
-            Ok(Tray { _icon: builder.build()?, login })
+            Ok(Tray {
+                _icon: builder.build()?,
+                login,
+            })
         }
 
         pub fn set_start_at_login(&self, on: bool) {
@@ -100,8 +123,17 @@ mod imp {
         fn icon_pixmap(&self) -> Vec<ksni::Icon> {
             let size = 32;
             // ARGB32, network byte order.
-            let data = crate::icon::app_icon_rgba(size).as_chunks::<4>().0.iter().flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
-            vec![ksni::Icon { width: size as i32, height: size as i32, data }]
+            let data = crate::icon::app_icon_rgba(size)
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .flat_map(|p| [p[3], p[0], p[1], p[2]])
+                .collect();
+            vec![ksni::Icon {
+                width: size as i32,
+                height: size as i32,
+                data,
+            }]
         }
 
         fn activate(&mut self, _x: i32, _y: i32) {
@@ -123,7 +155,9 @@ mod imp {
                 CheckmarkItem {
                     label: LOGIN_LABEL.into(),
                     checked: self.login,
-                    activate: Box::new(|t: &mut Sni| (t.on_command)(TrayCommand::ToggleStartAtLogin)),
+                    activate: Box::new(|t: &mut Sni| {
+                        (t.on_command)(TrayCommand::ToggleStartAtLogin)
+                    }),
                     ..Default::default()
                 }
                 .into(),
@@ -142,10 +176,13 @@ mod imp {
         /// without the AppIndicator extension) there's no tray; RedSnap still
         /// works through its hotkey and `redsnap toggle`.
         pub fn new(start_at_login: bool, on_command: OnCommand) -> Result<Self> {
-            let handle = Sni { login: start_at_login, on_command }
-                .spawn()
-                .map_err(|e| log::info!("no tray on this desktop: {e}"))
-                .ok();
+            let handle = Sni {
+                login: start_at_login,
+                on_command,
+            }
+            .spawn()
+            .map_err(|e| log::info!("no tray on this desktop: {e}"))
+            .ok();
             Ok(Tray { handle })
         }
 

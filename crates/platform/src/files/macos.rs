@@ -58,10 +58,14 @@ pub fn search(words: &str, limit: usize) -> Outcome {
     }
     let _ = child.kill();
     let _ = child.wait();
-    let paths = buf.split(|&b| b == 0).filter(|p| !p.is_empty()).take(limit).map(|p| {
-        use std::os::unix::ffi::OsStrExt;
-        PathBuf::from(std::ffi::OsStr::from_bytes(p))
-    });
+    let paths = buf
+        .split(|&b| b == 0)
+        .filter(|p| !p.is_empty())
+        .take(limit)
+        .map(|p| {
+            use std::os::unix::ffi::OsStrExt;
+            PathBuf::from(std::ffi::OsStr::from_bytes(p))
+        });
     Outcome::Hits(super::hits_for(paths))
 }
 
@@ -69,7 +73,13 @@ pub fn search(words: &str, limit: usize) -> Outcome {
 mod tests {
     #[test]
     fn query() {
-        assert_eq!(super::query("q3 report"), r#"kMDItemFSName == "*q3*"cd && kMDItemFSName == "*report*"cd"#);
-        assert_eq!(super::query(r#"a"b*\"#), r#"kMDItemFSName == "*a\"b\*\\*"cd"#);
+        assert_eq!(
+            super::query("q3 report"),
+            r#"kMDItemFSName == "*q3*"cd && kMDItemFSName == "*report*"cd"#
+        );
+        assert_eq!(
+            super::query(r#"a"b*\"#),
+            r#"kMDItemFSName == "*a\"b\*\\*"cd"#
+        );
     }
 }

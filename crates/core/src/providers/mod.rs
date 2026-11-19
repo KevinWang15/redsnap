@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use crate::calc;
 use crate::config::{QuickLink, Snippet, WebSearch};
-use crate::item::{Action, IconRef, InternalCommand, Item, ItemId, ProviderId, SystemCommand, url_allowed};
+use crate::item::{
+    Action, IconRef, InternalCommand, Item, ItemId, ProviderId, SystemCommand, url_allowed,
+};
 use crate::matcher::{MatchClass, Names};
 use crate::query::{Query, Target};
 use crate::search::{Candidate, Provider, SearchContext};
@@ -30,7 +32,10 @@ impl Provider for CalculatorProvider {
                 id: ItemId::new("calc", "result"),
                 provider: ProviderId::Calculator,
                 title: result.clone(),
-                subtitle: format!("{} = {result} · Enter to copy", q.text.trim_end_matches('=').trim()),
+                subtitle: format!(
+                    "{} = {result} · Enter to copy",
+                    q.text.trim_end_matches('=').trim()
+                ),
                 icon: IconRef::Builtin("calculator"),
                 primary: Action::CopyText(result),
                 secondary: None,
@@ -57,8 +62,8 @@ fn looks_like_url(s: &str) -> Option<String> {
     // TLD. File names like `config.json` must not turn into URLs, so the TLD
     // comes from a short list rather than "any letters".
     const TLDS: &[&str] = &[
-        "com", "net", "org", "io", "dev", "app", "ai", "co", "cn", "me", "so", "xyz", "info", "edu", "gov", "uk", "de",
-        "jp", "fr", "hk", "tw", "us", "cc", "tv",
+        "com", "net", "org", "io", "dev", "app", "ai", "co", "cn", "me", "so", "xyz", "info",
+        "edu", "gov", "uk", "de", "jp", "fr", "hk", "tw", "us", "cc", "tv",
     ];
     let host = lower.split('/').next().unwrap_or("");
     let host = host.split(':').next().unwrap_or("");
@@ -66,7 +71,9 @@ fn looks_like_url(s: &str) -> Option<String> {
     let plausible = host.contains('.')
         && TLDS.contains(&tld)
         && host.split('.').all(|label| !label.is_empty())
-        && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
     (lower.starts_with("www.") || plausible).then(|| format!("https://{s}"))
 }
 
@@ -111,7 +118,12 @@ impl CommandsProvider {
     /// enabled). RedSnap's own commands are always there.
     pub fn new(system: &[SystemCommand]) -> Self {
         let mut commands = Vec::new();
-        let mut add = |key: &str, title: &'static str, subtitle: &'static str, extra: &[&str], action, icon| {
+        let mut add = |key: &str,
+                       title: &'static str,
+                       subtitle: &'static str,
+                       extra: &[&str],
+                       action,
+                       icon| {
             let item = Item {
                 id: ItemId::new("cmd", key),
                 provider: ProviderId::Commands,
@@ -122,21 +134,75 @@ impl CommandsProvider {
                 secondary: None,
                 learnable: true,
             };
-            commands.push(Command { item: Arc::new(item), names: Names::new(title, extra.iter().copied()) });
+            commands.push(Command {
+                item: Arc::new(item),
+                names: Names::new(title, extra.iter().copied()),
+            });
         };
         use InternalCommand::*;
-        add("settings", "RedSnap Settings", "Open RedSnap's settings", &["preferences", "config"], Action::RedSnap(OpenSettings), "gear");
-        add("reload-apps", "Reload Apps", "Scan for installed apps again", &["rescan", "refresh"], Action::RedSnap(ReloadApps), "refresh");
-        add("about", "About RedSnap", "Version and data folders", &[], Action::RedSnap(About), "info");
-        add("quit", "Quit RedSnap", "Stop RedSnap until it's started again", &["exit"], Action::RedSnap(Quit), "power");
+        add(
+            "settings",
+            "RedSnap Settings",
+            "Open RedSnap's settings",
+            &["preferences", "config"],
+            Action::RedSnap(OpenSettings),
+            "gear",
+        );
+        add(
+            "reload-apps",
+            "Reload Apps",
+            "Scan for installed apps again",
+            &["rescan", "refresh"],
+            Action::RedSnap(ReloadApps),
+            "refresh",
+        );
+        add(
+            "about",
+            "About RedSnap",
+            "Version and data folders",
+            &[],
+            Action::RedSnap(About),
+            "info",
+        );
+        add(
+            "quit",
+            "Quit RedSnap",
+            "Stop RedSnap until it's started again",
+            &["exit"],
+            Action::RedSnap(Quit),
+            "power",
+        );
         for &c in system {
-            let (key, title, subtitle, extra): (&str, &'static str, &'static str, &[&str]) = match c {
+            let (key, title, subtitle, extra): (&str, &'static str, &'static str, &[&str]) = match c
+            {
                 SystemCommand::Lock => ("lock", "Lock Screen", "Lock this computer", &["lock"]),
-                SystemCommand::Sleep => ("sleep", "Sleep", "Put this computer to sleep", &["suspend"]),
-                SystemCommand::LogOut => ("log-out", "Log Out", "End this session (asks first)", &["sign out", "logout"]),
-                SystemCommand::Restart => ("restart", "Restart", "Restart this computer (asks first)", &["reboot"]),
-                SystemCommand::ShutDown => ("shut-down", "Shut Down", "Turn this computer off (asks first)", &["power off", "shutdown"]),
-                SystemCommand::EmptyTrash => ("empty-trash", "Empty Trash", "Delete everything in the Trash", &["recycle bin"]),
+                SystemCommand::Sleep => {
+                    ("sleep", "Sleep", "Put this computer to sleep", &["suspend"])
+                }
+                SystemCommand::LogOut => (
+                    "log-out",
+                    "Log Out",
+                    "End this session (asks first)",
+                    &["sign out", "logout"],
+                ),
+                SystemCommand::Restart => (
+                    "restart",
+                    "Restart",
+                    "Restart this computer (asks first)",
+                    &["reboot"],
+                ),
+                SystemCommand::ShutDown => (
+                    "shut-down",
+                    "Shut Down",
+                    "Turn this computer off (asks first)",
+                    &["power off", "shutdown"],
+                ),
+                SystemCommand::EmptyTrash => (
+                    "empty-trash",
+                    "Empty Trash",
+                    "Delete everything in the Trash",
+                    &["recycle bin"],
+                ),
             };
             add(key, title, subtitle, extra, Action::System(c), "power");
         }
@@ -155,7 +221,11 @@ impl Provider for CommandsProvider {
         }
         for c in &self.commands {
             // Commands need a literal match: "lock" shouldn't come up for "lo ck"-ish typos.
-            let Some(m) = q.prepared.best(&c.names, &mut cx.matcher).filter(|m| m.class != MatchClass::Fuzzy) else {
+            let Some(m) = q
+                .prepared
+                .best(&c.names, &mut cx.matcher)
+                .filter(|m| m.class != MatchClass::Fuzzy)
+            else {
                 continue;
             };
             out.push(Candidate::normal(c.item.clone(), m));
@@ -176,18 +246,36 @@ impl SnippetsProvider {
         let snippets = snippets
             .iter()
             .map(|s| {
-                let preview: String = s.text.lines().next().unwrap_or("").chars().take(80).collect();
+                let preview: String = s
+                    .text
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .chars()
+                    .take(80)
+                    .collect();
                 let item = Item {
                     id: ItemId::new("snippet", &s.id),
                     provider: ProviderId::Snippets,
-                    title: if s.name.is_empty() { s.trigger.clone() } else { s.name.clone() },
-                    subtitle: if s.trigger.is_empty() { preview } else { format!("{} · {preview}", s.trigger) },
+                    title: if s.name.is_empty() {
+                        s.trigger.clone()
+                    } else {
+                        s.name.clone()
+                    },
+                    subtitle: if s.trigger.is_empty() {
+                        preview
+                    } else {
+                        format!("{} · {preview}", s.trigger)
+                    },
                     icon: IconRef::Builtin("snippet"),
                     primary: Action::Snippet(s.id.clone()),
                     secondary: None,
                     learnable: true,
                 };
-                let names = Names::new(&item.title, [s.trigger.as_str()].into_iter().filter(|t| !t.is_empty()));
+                let names = Names::new(
+                    &item.title,
+                    [s.trigger.as_str()].into_iter().filter(|t| !t.is_empty()),
+                );
                 (Arc::new(item), names)
             })
             .collect();
@@ -212,8 +300,17 @@ impl Provider for SnippetsProvider {
         let prepared = crate::matcher::PreparedQuery::new(text);
         for (item, names) in &self.snippets {
             if only && prepared.is_empty() {
-                out.push(Candidate::normal(item.clone(), crate::matcher::Match { class: MatchClass::Exact, score: 0 }));
-            } else if let Some(m) = prepared.best(names, &mut cx.matcher).filter(|m| only || m.class != MatchClass::Fuzzy) {
+                out.push(Candidate::normal(
+                    item.clone(),
+                    crate::matcher::Match {
+                        class: MatchClass::Exact,
+                        score: 0,
+                    },
+                ));
+            } else if let Some(m) = prepared
+                .best(names, &mut cx.matcher)
+                .filter(|m| only || m.class != MatchClass::Fuzzy)
+            {
                 out.push(Candidate::normal(item.clone(), m));
             }
         }
@@ -231,7 +328,9 @@ fn percent_encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             b' ' => out.push('+'),
             _ => out.push_str(&format!("%{b:02X}")),
         }
@@ -245,8 +344,13 @@ pub struct WebSearchProvider {
 
 impl WebSearchProvider {
     pub fn new(searches: Vec<WebSearch>) -> Self {
-        let searches =
-            searches.into_iter().map(|w| { let names = Names::new(&w.name, [w.keyword.as_str()]); (w, names) }).collect();
+        let searches = searches
+            .into_iter()
+            .map(|w| {
+                let names = Names::new(&w.name, [w.keyword.as_str()]);
+                (w, names)
+            })
+            .collect();
         WebSearchProvider { searches }
     }
 
@@ -255,7 +359,11 @@ impl WebSearchProvider {
         Item {
             id: ItemId::new("web", &w.id),
             provider: ProviderId::WebSearch,
-            title: if words.is_empty() { format!("Search {}", w.name) } else { format!("Search {} for “{words}”", w.name) },
+            title: if words.is_empty() {
+                format!("Search {}", w.name)
+            } else {
+                format!("Search {} for “{words}”", w.name)
+            },
             subtitle: url.clone(),
             icon: IconRef::Builtin("search"),
             primary: Action::OpenUrl(url.clone()),
@@ -282,7 +390,11 @@ impl Provider for WebSearchProvider {
             None => {
                 // "google" finds the Google search itself, waiting for words.
                 for (w, names) in &self.searches {
-                    if let Some(m) = q.prepared.best(names, &mut cx.matcher).filter(|m| m.class <= MatchClass::WordPrefix) {
+                    if let Some(m) = q
+                        .prepared
+                        .best(names, &mut cx.matcher)
+                        .filter(|m| m.class <= MatchClass::WordPrefix)
+                    {
                         out.push(Candidate::normal(Arc::new(Self::item(w, "")), m));
                     }
                 }
@@ -307,7 +419,10 @@ impl QuickLinksProvider {
         let links = links
             .into_iter()
             .map(|l| {
-                let names = Names::new(&l.name, [l.keyword.as_str()].into_iter().filter(|k| !k.is_empty()));
+                let names = Names::new(
+                    &l.name,
+                    [l.keyword.as_str()].into_iter().filter(|k| !k.is_empty()),
+                );
                 (l, names)
             })
             .collect();
@@ -360,9 +475,18 @@ mod tests {
 
     #[test]
     fn urls() {
-        assert_eq!(looks_like_url("example.com").as_deref(), Some("https://example.com"));
-        assert_eq!(looks_like_url("www.example.com/x").as_deref(), Some("https://www.example.com/x"));
-        assert_eq!(looks_like_url("http://localhost:8080").as_deref(), Some("http://localhost:8080"));
+        assert_eq!(
+            looks_like_url("example.com").as_deref(),
+            Some("https://example.com")
+        );
+        assert_eq!(
+            looks_like_url("www.example.com/x").as_deref(),
+            Some("https://www.example.com/x")
+        );
+        assert_eq!(
+            looks_like_url("http://localhost:8080").as_deref(),
+            Some("http://localhost:8080")
+        );
         assert_eq!(looks_like_url("config.json"), None);
         assert_eq!(looks_like_url("notes.txt"), None);
         assert_eq!(looks_like_url("1.5"), None);
@@ -371,7 +495,13 @@ mod tests {
 
     #[test]
     fn templates_are_url_encoded() {
-        assert_eq!(fill_template("https://x/?q={query}", "rust gpui&co"), "https://x/?q=rust+gpui%26co");
-        assert_eq!(fill_template("https://x/?q={query}", "微信"), "https://x/?q=%E5%BE%AE%E4%BF%A1");
+        assert_eq!(
+            fill_template("https://x/?q={query}", "rust gpui&co"),
+            "https://x/?q=rust+gpui%26co"
+        );
+        assert_eq!(
+            fill_template("https://x/?q={query}", "微信"),
+            "https://x/?q=%E5%BE%AE%E4%BF%A1"
+        );
     }
 }

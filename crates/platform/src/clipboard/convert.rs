@@ -7,7 +7,9 @@ use std::path::PathBuf;
 use redsnap_core::clipboard::Content;
 
 pub fn png_size(png: &[u8]) -> Option<(u32, u32)> {
-    let d = image::ImageReader::with_format(std::io::Cursor::new(png), image::ImageFormat::Png).into_dimensions().ok()?;
+    let d = image::ImageReader::with_format(std::io::Cursor::new(png), image::ImageFormat::Png)
+        .into_dimensions()
+        .ok()?;
     Some(d)
 }
 
@@ -15,7 +17,10 @@ pub fn png_size(png: &[u8]) -> Option<(u32, u32)> {
 /// 32-bit uncompressed and bitfield images, top-down or bottom-up; anything
 /// else (palettes, RLE) returns `None` and the copy is reported unsupported.
 pub fn dib_to_png(dib: &[u8]) -> Option<Content> {
-    let u32_at = |o: usize| dib.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    let u32_at = |o: usize| {
+        dib.get(o..o + 4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
     let header = u32_at(0)? as usize;
     let width = u32_at(4)? as i32;
     let height = u32_at(8)? as i32;
@@ -61,13 +66,21 @@ pub fn dib_to_png(dib: &[u8]) -> Option<Content> {
         }
     }
     let mut png = Vec::new();
-    image::DynamicImage::ImageRgba8(out).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok()?;
-    Some(Content::Image { png, width: w as u32, height: h as u32 })
+    image::DynamicImage::ImageRgba8(out)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .ok()?;
+    Some(Content::Image {
+        png,
+        width: w as u32,
+        height: h as u32,
+    })
 }
 
 /// PNG to a bottom-up 32-bit `CF_DIB`, for apps that don't read PNG.
 pub fn png_to_dib(png: &[u8]) -> Option<Vec<u8>> {
-    let img = image::load_from_memory_with_format(png, image::ImageFormat::Png).ok()?.into_rgba8();
+    let img = image::load_from_memory_with_format(png, image::ImageFormat::Png)
+        .ok()?
+        .into_rgba8();
     let (w, h) = (img.width() as usize, img.height() as usize);
     let mut out = Vec::with_capacity(40 + w * h * 4);
     for v in [40u32, w as u32, h as u32] {
@@ -106,7 +119,11 @@ pub fn dropfiles(files: &[PathBuf]) -> Vec<u8> {
 pub fn strip_html(cf_html: &str) -> String {
     let body = cf_html
         .find("<!--StartFragment-->")
-        .and_then(|s| cf_html[s..].find("<!--EndFragment-->").map(|e| &cf_html[s + 20..s + e]))
+        .and_then(|s| {
+            cf_html[s..]
+                .find("<!--EndFragment-->")
+                .map(|e| &cf_html[s + 20..s + e])
+        })
         .unwrap_or(cf_html);
     let mut out = String::new();
     let mut in_tag = false;
@@ -118,9 +135,12 @@ pub fn strip_html(cf_html: &str) -> String {
             _ => {}
         }
     }
-    out.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
+    out.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -130,13 +150,23 @@ mod tests {
     fn dib_round_trip_through_png() {
         // 2×1 red-and-blue image, opaque.
         let png = {
-            let img = image::RgbaImage::from_raw(2, 1, vec![255, 0, 0, 255, 0, 0, 255, 255]).unwrap();
+            let img =
+                image::RgbaImage::from_raw(2, 1, vec![255, 0, 0, 255, 0, 0, 255, 255]).unwrap();
             let mut v = Vec::new();
-            image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut v), image::ImageFormat::Png).unwrap();
+            image::DynamicImage::ImageRgba8(img)
+                .write_to(&mut std::io::Cursor::new(&mut v), image::ImageFormat::Png)
+                .unwrap();
             v
         };
         let dib = png_to_dib(&png).unwrap();
-        let Some(Content::Image { png: back, width, height }) = dib_to_png(&dib) else { panic!("not an image") };
+        let Some(Content::Image {
+            png: back,
+            width,
+            height,
+        }) = dib_to_png(&dib)
+        else {
+            panic!("not an image")
+        };
         assert_eq!((width, height), (2, 1));
         let img = image::load_from_memory(&back).unwrap().into_rgba8();
         assert_eq!(img.get_pixel(0, 0).0, [255, 0, 0, 255]);
@@ -152,8 +182,17 @@ mod tests {
         dib[12] = 1; // planes
         dib[14] = 32; // bits
         dib.extend_from_slice(&[10, 20, 30, 0]);
-        let Some(Content::Image { png, .. }) = dib_to_png(&dib) else { panic!() };
-        assert_eq!(image::load_from_memory(&png).unwrap().into_rgba8().get_pixel(0, 0).0, [30, 20, 10, 255]);
+        let Some(Content::Image { png, .. }) = dib_to_png(&dib) else {
+            panic!()
+        };
+        assert_eq!(
+            image::load_from_memory(&png)
+                .unwrap()
+                .into_rgba8()
+                .get_pixel(0, 0)
+                .0,
+            [30, 20, 10, 255]
+        );
         dib[14] = 8;
         assert!(dib_to_png(&dib).is_none());
     }
