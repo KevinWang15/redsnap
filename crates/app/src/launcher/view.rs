@@ -79,7 +79,8 @@ impl Render for Launcher {
             )
             .child(logo_button());
 
-        let results = div()
+        let in_clip = self.in_clipboard();
+        let results = if in_clip { self.clip_body(cx) } else { div()
             .relative()
             .mt(px(12.))
             .h(px(rows as f32 * 66.))
@@ -101,12 +102,18 @@ impl Render for Launcher {
                 )
             })
             .children(list)
-            .when_some(self.panel.as_ref(), |d, panel| d.child(action_panel(panel)));
+            .when_some(self.panel.as_ref(), |d, panel| d.child(action_panel(panel)))
+            .into_any_element() };
 
         let footer_status: SharedString = match &self.confirming {
             Some(item) => format!("Press Enter again to {}", item.title.to_lowercase()).into(),
+            None if in_clip => {
+                let n = self.clip.found.len();
+                format!("Clipboard · {n} entr{}", if n == 1 { "y" } else { "ies" }).into()
+            }
             None => format!("{count} result{}", if count == 1 { "" } else { "s" }).into(),
         };
+        let copy_key: &'static str = if cfg!(target_os = "macos") { "⌘C" } else { "Ctrl C" };
         let footer = div()
             .mt_auto()
             .h(px(44.))
@@ -126,9 +133,9 @@ impl Render for Launcher {
             .child(div().flex_1())
             .child(key_hint("↑↓", "Navigate"))
             .child(div().w(px(16.)))
-            .child(key_hint("↵", "Open"))
+            .child(key_hint("↵", if in_clip { "Paste" } else { "Open" }))
             .child(div().w(px(16.)))
-            .child(key_hint("⇥", "Actions"));
+            .child(if in_clip { key_hint(copy_key, "Copy").into_any_element() } else { key_hint("⇥", "Actions").into_any_element() });
 
         let content = div()
             .relative()
@@ -150,6 +157,7 @@ impl Render for Launcher {
             .on_action(cx.listener(Self::run))
             .on_action(cx.listener(Self::run_secondary))
             .on_action(cx.listener(Self::toggle_actions))
+            .on_action(cx.listener(Self::copy_entry))
             .on_action(cx.listener(Self::dismiss))
             .on_action(cx.listener(|this, _: &Run1, _, cx| this.run_row(0, cx)))
             .on_action(cx.listener(|this, _: &Run2, _, cx| this.run_row(1, cx)))

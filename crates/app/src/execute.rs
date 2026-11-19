@@ -23,7 +23,7 @@ pub fn take_error() -> Option<String> {
     LAST_ERROR.lock().unwrap().take()
 }
 
-fn fail(what: &str, e: anyhow::Error) {
+pub fn fail(what: &str, e: anyhow::Error) {
     log::warn!("{what}: {e:#}");
     *LAST_ERROR.lock().unwrap() = Some(format!("{what} failed: {e:#}"));
 }

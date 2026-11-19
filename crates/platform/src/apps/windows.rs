@@ -151,7 +151,7 @@ pub fn icon(target: &LaunchTarget, px: u32) -> Option<(usize, usize, Vec<u8>)> {
             if a > 0 {
                 any = true;
                 for c in &mut p[..3] {
-                    *c = ((*c as u32 * 255 + a / 2) / a).min(255) as u8;
+                    *c = (*c as u32 * 255 + a / 2).checked_div(a).unwrap_or(0).min(255) as u8;
                 }
             }
         }

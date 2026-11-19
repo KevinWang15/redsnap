@@ -2,6 +2,7 @@
 //! shown and hidden with OS calls (PLAN.md §5.1), drawn to docs/design.md.
 
 mod backdrop;
+pub mod clip;
 pub mod query_field;
 mod view;
 
@@ -93,6 +94,11 @@ pub struct Launcher {
     notice: Option<String>,
     pub native: Option<Native>,
     pub visible: bool,
+    /// Opened with the clipboard shortcut: the clipboard view until hidden.
+    clip_sticky: bool,
+    clip: clip::ClipView,
+    /// The window in front before this show, to paste into.
+    paste_target: Option<redsnap_platform::clipboard::Target>,
     /// Whether the window has been active since it was last shown.
     had_focus: bool,
     opts: Options,
@@ -137,6 +143,9 @@ impl Launcher {
             notice: None,
             native: None,
             visible: false,
+            clip_sticky: false,
+            clip: clip::ClipView::default(),
+            paste_target: None,
             had_focus: false,
             opts,
             backdrop: None,
@@ -170,11 +179,34 @@ impl Launcher {
         perf::results_ready();
     }
 
+    /// Whether the clipboard view is showing: opened with its shortcut, or
+    /// the query starts with `cb `.
+    pub(super) fn in_clipboard(&self) -> bool {
+        self.clip_sticky || self.query.trim_start().starts_with("cb ")
+    }
+
+    /// New clipboard entries arrived.
+    pub fn clipboard_changed(&mut self, cx: &mut Context<Self>) {
+        if self.visible && self.in_clipboard() {
+            self.refresh_clipboard(cx);
+            cx.notify();
+        }
+    }
+
     fn query_changed(&mut self, cx: &mut Context<Self>) {
         self.query = self.field.read(cx).query();
         self.panel = None;
         self.confirming = None;
         self.notice = None;
+        if self.in_clipboard() {
+            self.clip.selected = 0;
+            self.clip.top = 0;
+            self.refresh_clipboard(cx);
+            perf::results_ready();
+            cx.notify();
+            self.paint_soon(cx);
+            return;
+        }
         // A new query starts at the top.
         self.hits.clear();
         self.refresh();
@@ -202,7 +234,9 @@ impl Launcher {
     }
 
     /// Fresh state for a new show: empty query, the most used items.
-    fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn reset(&mut self, clipboard: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.clip_sticky = clipboard;
+        self.clip = clip::ClipView::default();
         if let Some(e) = execute::take_error() {
             self.notice = Some(e);
         }
@@ -213,6 +247,9 @@ impl Launcher {
         self.confirming = None;
         self.hits.clear();
         self.refresh();
+        if clipboard {
+            self.refresh_clipboard(cx);
+        }
         window.focus(&self.field.focus_handle(cx));
         cx.notify();
     }
@@ -246,6 +283,11 @@ impl Launcher {
     }
 
     fn move_selection(&mut self, to: isize, cx: &mut Context<Self>) {
+        if self.panel.is_none() && self.in_clipboard() {
+            self.clip_move(to, cx);
+            self.paint_soon(cx);
+            return;
+        }
         if let Some(panel) = &mut self.panel {
             let n = panel.actions.len() as isize;
             panel.selected = to.clamp(0, n - 1) as usize;
@@ -261,6 +303,9 @@ impl Launcher {
     }
 
     fn current(&self) -> isize {
+        if self.panel.is_none() && self.in_clipboard() {
+            return self.clip.selected as isize;
+        }
         self.panel.as_ref().map_or(self.selected, |p| p.selected) as isize
     }
 
@@ -280,7 +325,18 @@ impl Launcher {
         self.move_selection(self.current() - self.opts.rows as isize, cx);
     }
 
+    /// Ctrl/Cmd+C with nothing selected in the field: copy the selected
+    /// clipboard entry (no paste).
+    fn copy_entry(&mut self, _: &query_field::Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if self.in_clipboard() {
+            self.clip_use(false, cx);
+        }
+    }
+
     fn toggle_actions(&mut self, _: &ToggleActions, _: &mut Window, cx: &mut Context<Self>) {
+        if self.in_clipboard() {
+            return;
+        }
         if self.panel.take().is_none()
             && let Some(hit) = self.hits.get(self.selected)
         {
@@ -306,6 +362,10 @@ impl Launcher {
     }
 
     fn run(&mut self, _: &Run, _: &mut Window, cx: &mut Context<Self>) {
+        if self.in_clipboard() {
+            self.clip_use(true, cx);
+            return;
+        }
         if let Some(panel) = self.panel.take() {
             let action = panel.actions[panel.selected].clone();
             self.execute(panel.item, action, cx);
@@ -361,10 +421,13 @@ impl Focusable for Launcher {
 /// monitor under the cursor, capture and blur the screen under it (it's
 /// still hidden, so not in the picture), paint while cloaked, reveal, focus.
 /// Runs as a task so no OS call happens inside a gpui update.
-pub async fn show(handle: WindowHandle<Launcher>, started: Instant, cx: &mut AsyncApp) {
+pub async fn show(handle: WindowHandle<Launcher>, started: Instant, clipboard: bool, cx: &mut AsyncApp) {
     perf::show_started(started);
+    // Before RedSnap takes the foreground: where Enter in the clipboard view pastes.
+    let target = redsnap_platform::clipboard::foreground();
     let prepared = handle.update(cx, |launcher, window, cx| {
-        launcher.reset(window, cx);
+        launcher.paste_target = target;
+        launcher.reset(clipboard, window, cx);
         launcher.visible = true;
         (launcher.native, launcher.opts)
     });

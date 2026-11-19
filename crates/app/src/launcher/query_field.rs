@@ -222,6 +222,9 @@ impl QueryField {
         if !self.selected.is_empty() {
             let selected = self.clamp_range(&self.selected);
             cx.write_to_clipboard(ClipboardItem::new_string(self.content[selected].to_string()));
+        } else {
+            // Nothing selected: let the window copy the selected result.
+            cx.propagate();
         }
     }
 

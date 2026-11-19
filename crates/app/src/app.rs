@@ -32,6 +32,9 @@ use crate::launcher::{self, Launcher};
 /// Everything that reaches the app from outside gpui, in one channel.
 pub enum Event {
     Hotkey(Instant),
+    /// The clipboard shortcut.
+    ClipHotkey(Instant),
+    Clip(redsnap_platform::clipboard::ClipEvent),
     Cli(CliCommand),
     Tray(TrayCommand),
     /// Scan installed apps again (startup, "Reload Apps", a stale catalog).
@@ -160,27 +163,75 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
         // The global shortcut. If it's taken, RedSnap still runs (tray,
         // `redsnap toggle`) and says so when the window opens.
         let manager = GlobalHotKeyManager::new().map_err(|e| log::error!("hotkeys unavailable: {e}")).ok();
-        match (manager.as_ref(), config.hotkey.parse::<HotKey>()) {
-            (Some(m), Ok(hotkey)) => {
-                if let Err(e) = m.register(hotkey) {
-                    let msg = format!("The shortcut {} is taken by another app ({e}). Change it in Settings.", config.hotkey);
-                    log::warn!("{msg}");
-                    notice.get_or_insert(msg);
+        let mut register = |spec: &str, what: &str| -> Option<u32> {
+            match (manager.as_ref(), spec.parse::<HotKey>()) {
+                (Some(m), Ok(hotkey)) => match m.register(hotkey) {
+                    Ok(()) => Some(hotkey.id()),
+                    Err(e) => {
+                        let msg = format!("The {what} shortcut {spec} is taken by another app ({e}). Change it in Settings.");
+                        log::warn!("{msg}");
+                        notice.get_or_insert(msg);
+                        None
+                    }
+                },
+                (_, Err(e)) => {
+                    notice.get_or_insert(format!("The {what} shortcut {spec:?} isn't valid ({e}). Change it in Settings."));
+                    None
                 }
+                (None, _) => None,
             }
-            (_, Err(e)) => {
-                notice.get_or_insert(format!("The shortcut {:?} isn't valid ({e}). Change it in Settings.", config.hotkey));
-            }
-            (None, _) => {}
-        }
+        };
+        let _main_id = register(&config.hotkey, "RedSnap");
+        let clip_id = if config.clipboard.enabled { register(&config.clipboard.hotkey, "clipboard") } else { None };
         // Keep the manager (and its registration) for the life of the app.
         Box::leak(Box::new(manager));
         let hk = events.clone();
         GlobalHotKeyEvent::set_event_handler(Some(move |e: GlobalHotKeyEvent| {
             if e.state == HotKeyState::Pressed {
-                let _ = hk.unbounded_send(Event::Hotkey(Instant::now()));
+                let event = if Some(e.id) == clip_id { Event::ClipHotkey(Instant::now()) } else { Event::Hotkey(Instant::now()) };
+                let _ = hk.unbounded_send(event);
             }
         }));
+
+        // Clipboard history: the store, and the watcher that feeds it.
+        if config.clipboard.enabled {
+            let c = &config.clipboard;
+            let limits = redsnap_core::clipboard::Limits {
+                keep_days: c.keep_days,
+                max_entries: c.max_entries as usize,
+                ..Default::default()
+            };
+            match redsnap_core::clipboard::ClipStore::open(&paths.data.join("clipboard.db"), limits) {
+                Ok(store) => {
+                    let clip_events = events.clone();
+                    let read = redsnap_platform::clipboard::ReadLimits {
+                        max_text_bytes: limits.max_text_bytes,
+                        max_image_bytes: limits.max_image_bytes,
+                    };
+                    let watcher = redsnap_platform::clipboard::Watcher::start(
+                        read,
+                        Box::new(move |e| {
+                            let _ = clip_events.unbounded_send(Event::Clip(e));
+                        }),
+                    )
+                    .map_err(|e| log::warn!("clipboard capture: {e:#}"))
+                    .ok()
+                    .flatten();
+                    if watcher.is_none() {
+                        log::info!("clipboard capture isn't available on this OS yet");
+                    }
+                    cx.set_global(crate::launcher::clip::Clipboard {
+                        store,
+                        watcher: watcher.map(Arc::new),
+                        show_skipped: c.show_skipped,
+                    });
+                }
+                Err(e) => {
+                    notice.get_or_insert(format!("Clipboard history couldn't open its database: {e:#}"));
+                }
+            }
+        }
+        let excluded: Vec<String> = config.clipboard.excluded_apps.iter().map(|a| a.to_lowercase()).collect();
 
         let tray_events = events.clone();
         let tray = Tray::new(autostart::is_enabled(), Box::new(move |c| {
@@ -210,6 +261,8 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
             while let Some(event) = rx.next().await {
                 log::debug!("event {}", match &event {
                     Event::Hotkey(_) => "hotkey".to_string(),
+                    Event::ClipHotkey(_) => "clipboard hotkey".to_string(),
+                    Event::Clip(c) => format!("clipboard change from {:?}", c.source_app),
                     Event::Cli(c) => format!("cli {c:?}"),
                     Event::Tray(t) => format!("tray {t:?}"),
                     Event::Rescan => "rescan".into(),
@@ -219,14 +272,42 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
                 let visible = handle.update(cx, |l, _, _| l.visible).unwrap_or(false);
                 match event {
                     // The shortcut toggles.
-                    Event::Hotkey(_) | Event::Cli(CliCommand::Toggle) if visible => {
+                    Event::Hotkey(_) | Event::ClipHotkey(_) | Event::Cli(CliCommand::Toggle) if visible => {
                         handle.update(cx, |l, _, cx| l.hide(cx)).ok();
+                    }
+                    Event::ClipHotkey(at) => launcher::show(handle, at, true, cx).await,
+                    Event::Clip(e) => {
+                        use redsnap_core::clipboard::{Capture, Skip};
+                        use redsnap_platform::clipboard::ClipEventKind;
+                        let stored = cx
+                            .update(|cx| {
+                                let Some(c) = cx.try_global::<crate::launcher::clip::Clipboard>() else { return false };
+                                match e.kind {
+                                    // RedSnap pasted an entry; it already moved to the top.
+                                    ClipEventKind::OwnWrite(_) => false,
+                                    ClipEventKind::Captured(capture) => {
+                                        let app = e.source_app.as_deref().map(str::to_lowercase);
+                                        let excluded_app = app.as_ref().is_some_and(|a| {
+                                            excluded.iter().any(|x| a == x || a.trim_end_matches(".exe") == x.trim_end_matches(".exe"))
+                                        });
+                                        let capture = if excluded_app { Capture::Skipped(Skip::ExcludedApp) } else { capture };
+                                        c.store.add(capture, e.source_app.clone(), e.at);
+                                        true
+                                    }
+                                }
+                            })
+                            .unwrap_or(false);
+                        if stored && visible {
+                            // The store commits on its own thread; look again shortly.
+                            cx.background_executor().timer(std::time::Duration::from_millis(50)).await;
+                            handle.update(cx, |l, _, cx| l.clipboard_changed(cx)).ok();
+                        }
                     }
                     Event::Hotkey(at) => {
                         if last_scan.is_some_and(|t| t.elapsed() > STALE) && !scanning {
                             let _ = events_loop.unbounded_send(Event::Rescan);
                         }
-                        launcher::show(handle, at, cx).await
+                        launcher::show(handle, at, false, cx).await
                     }
                     Event::Rescan if scanning => {}
                     Event::Rescan => {
@@ -265,7 +346,7 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
                     }
                     Event::Cli(CliCommand::Toggle | CliCommand::Show) | Event::Tray(TrayCommand::Open) => {
                         if !visible {
-                            launcher::show(handle, Instant::now(), cx).await;
+                            launcher::show(handle, Instant::now(), false, cx).await;
                         }
                     }
                     Event::Cli(CliCommand::Settings) | Event::Tray(TrayCommand::Settings) => {
