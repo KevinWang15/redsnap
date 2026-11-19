@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "spikes/latency"]
+members = ["crates/core", "crates/platform", "spikes/latency"]
 
 [workspace.package]
 version = "0.0.0"
@@ -20,6 +20,7 @@ xattr = { path = "third_party/xattr" }
 
 [workspace.dependencies]
 redsnap-core = { path = "crates/core" }
+redsnap-platform = { path = "crates/platform" }
 anyhow = "1"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
