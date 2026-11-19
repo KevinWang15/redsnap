@@ -68,11 +68,9 @@ about 1.25× scale, so measurements from it are divided by 1.25.
 ## Footer
 
 - A 1 px divider `rgba(255, 255, 255, 0.07)` above it. Height 44.
-- Left side:
-  - a 7 px red dot `#E8344E`;
-  - "RedSnap", 13 px semibold, `rgba(255, 255, 255, 0.85)`;
-  - a 3 px gray dot;
-  - "5 results", 13 px, `rgba(255, 255, 255, 0.50)`.
+- Left side: "5 results" (or "Clipboard · 5 entries"), 13 px,
+  `rgba(255, 255, 255, 0.50)`. (The mockup's red dot and "RedSnap" label were
+  dropped, 2026-11-19.)
 - Right side: key hints, each a 20 px key cap (radius 5, border 1 px
   `rgba(255, 255, 255, 0.18)`) followed by a label 13 px `rgba(255, 255, 255, 0.60)`:
   "↑↓ Navigate", "↵ Open". "⇥ Actions" is added once the action panel exists.

@@ -126,9 +126,6 @@ impl Render for Launcher {
             .flex()
             .items_center()
             .text_size(px(13.))
-            .child(div().size(px(7.)).rounded_full().bg(rgb(RED)))
-            .child(div().ml(px(8.)).font_weight(gpui::FontWeight::SEMIBOLD).text_color(white(0.85)).child("RedSnap"))
-            .child(div().mx(px(8.)).size(px(3.)).rounded_full().bg(white(0.4)))
             .child(
                 div()
                     .text_color(if self.confirming.is_some() { rgb(0xFF8090).into() } else { white(0.5) })
