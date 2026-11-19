@@ -152,7 +152,7 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
     let usage = UsageStore::open(&paths.data.join("usage.db"))?;
     autostart::refresh();
 
-    Application::new().run(move |cx| {
+    Application::new().with_assets(crate::assets::Assets).run(move |cx| {
         cx.set_global(Shell { paths: paths.clone() });
         cx.set_global(Events(events.clone()));
         let catalog = Arc::new(ArcSwap::from_pointee(AppCatalog::empty()));

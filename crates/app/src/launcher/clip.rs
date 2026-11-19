@@ -500,19 +500,20 @@ impl Launcher {
         let e = &self.clip.history.entries[found.index];
         let selected = i == self.clip.selected;
         let skipped = e.kind == Kind::Skipped;
+        use crate::assets::icon as ic;
         let (glyph, title, ranges) = match e.kind {
             Kind::Text => {
                 let (l, r) = first_line(&e.text, &found.highlights);
-                ("T", l, r)
+                (ic::TYPE, l, r)
             }
-            Kind::Image => ("▣", e.text.clone(), Vec::new()),
+            Kind::Image => (ic::IMAGE, e.text.clone(), Vec::new()),
             Kind::Files => {
                 let n = e.text.lines().count();
                 let first = e.text.lines().next().unwrap_or("");
                 let name = std::path::Path::new(first).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-                ("▤", if n > 1 { format!("{name} and {} more", n - 1) } else { name }, Vec::new())
+                (ic::FILES, if n > 1 { format!("{name} and {} more", n - 1) } else { name }, Vec::new())
             }
-            Kind::Skipped => ("–", format!("Not kept: {}", e.text), Vec::new()),
+            Kind::Skipped => (ic::BAN, format!("Not kept: {}", e.text), Vec::new()),
         };
         let app = e.source_app.clone().map(|a| a.trim_end_matches(".exe").to_string()).unwrap_or_else(|| "Unknown app".into());
         let subtitle = format!("{app} · {}", ago(e.last_copied_at));
@@ -551,9 +552,7 @@ impl Launcher {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_size(px(15.))
-                    .text_color(white(0.9))
-                    .child(glyph),
+                    .child(super::view::icon_svg(glyph, 17., white(0.9))),
             )
             .child(
                 div()
@@ -571,7 +570,7 @@ impl Launcher {
                             .child(subtitle),
                     ),
             )
-            .when(e.pinned, |d| d.child(div().flex_none().text_size(px(13.)).text_color(rgb(0xFFC94D)).child("★")))
+            .when(e.pinned, |d| d.child(super::view::icon_svg(crate::assets::icon::PIN, 15., rgb(0xFFC94D).into())))
             .into_any_element()
     }
 

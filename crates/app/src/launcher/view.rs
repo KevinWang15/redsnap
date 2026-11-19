@@ -71,9 +71,7 @@ impl Render for Launcher {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .text_size(px(15.))
-                                .text_color(white(0.75))
-                                .child("×")
+                                .child(icon_svg(crate::assets::icon::X, 14., white(0.8)))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.field.update(cx, |f, cx| f.clear(cx));
                                     window.focus(&this.field.focus_handle(cx));
@@ -132,12 +130,12 @@ impl Render for Launcher {
                     .child(footer_status),
             )
             .child(div().flex_1())
-            .child(key_hint("↑↓", "Navigate"))
+            .child(key_hint(Cap::Icon(crate::assets::icon::ARROW_UP_DOWN), "Navigate"))
             .child(div().w(px(16.)))
-            .child(key_hint("↵", if in_clip { "Paste" } else { "Open" }))
+            .child(key_hint(Cap::Icon(crate::assets::icon::CORNER_DOWN_LEFT), if in_clip { "Paste" } else { "Open" }))
             .child(div().w(px(16.)))
-            .when(in_clip, |d| d.child(key_hint(copy_key, "Copy")).child(div().w(px(16.))))
-            .child(key_hint("⇥", "Actions"));
+            .when(in_clip, |d| d.child(key_hint(Cap::Text(copy_key), "Copy")).child(div().w(px(16.))))
+            .child(key_hint(Cap::Icon(crate::assets::icon::ARROW_RIGHT_TO_LINE), "Actions"));
 
         let content = div()
             .relative()
@@ -197,12 +195,12 @@ impl Render for Launcher {
 impl Launcher {
     fn row(&self, i: usize, selected: bool, slot: usize, cx: &mut Context<Self>) -> AnyElement {
         let item = &self.hits[i].item;
-        let hint: SharedString = if selected {
-            "↵".into()
+        let hint: AnyElement = if selected {
+            icon_svg(crate::assets::icon::CORNER_DOWN_LEFT, 17., white(0.9)).into_any_element()
         } else if slot < 9 {
-            shortcut(slot + 1).into()
+            div().text_size(px(15.)).text_color(white(0.45)).child(SharedString::from(shortcut(slot + 1))).into_any_element()
         } else {
-            "".into()
+            div().into_any_element()
         };
         div()
             .id(("row", i))
@@ -244,54 +242,49 @@ impl Launcher {
                             .child(item.subtitle.clone()),
                     ),
             )
-            .child(div().text_size(px(15.)).text_color(if selected { white(0.9) } else { white(0.45) }).child(hint))
+            .child(hint)
             .into_any_element()
     }
 }
 
 /// A 38 px tile: the app's own icon once loaded; until then (or without
-/// one) a colored tile with the first letter. Built-in results get a glyph.
+/// one) a colored tile with the first letter. Built-in results get an icon.
 fn icon(item: &Item, cx: &gpui::App) -> AnyElement {
+    use crate::assets::icon as i;
     if let (IconRef::App(id), Action::Launch(target)) = (&item.icon, &item.primary)
         && let Some(image) = crate::icons::get(cx, id, target)
     {
         return img(image).size(px(38.)).flex_none().object_fit(ObjectFit::Contain).into_any_element();
     }
-    let (glyph, color): (String, u32) = match &item.icon {
+    let tile = |color: u32| div().size(px(38.)).flex_none().rounded(px(9.)).bg(rgb(color)).flex().items_center().justify_center();
+    match &item.icon {
         IconRef::Builtin(name) => {
-            let g = match *name {
-                "calculator" => "=",
-                "folder" => "▸",
-                "link" => "↗",
-                "search" => "⌕",
-                "gear" => "⚙",
-                "refresh" => "↻",
-                "info" => "i",
-                "power" => "⏻",
-                "snippet" => "✎",
-                _ => "•",
+            let path = match *name {
+                "calculator" => i::CALCULATOR,
+                "folder" => i::FOLDER,
+                "link" => i::EXTERNAL_LINK,
+                "search" => i::SEARCH,
+                "gear" => i::SETTINGS,
+                "refresh" => i::REFRESH_CW,
+                "info" => i::INFO,
+                "power" => i::POWER,
+                "snippet" => i::SQUARE_PEN,
+                _ => i::INFO,
             };
-            (g.into(), 0x3A4152)
+            tile(0x3A4152).child(icon_svg(path, 20., white(0.92))).into_any_element()
         }
         IconRef::App(id) => {
             let palette = [0xD9534F, 0xE67E22, 0xF1C40F, 0x27AE60, 0x16A085, 0x2E86DE, 0x8E44AD, 0xC0392B];
             let h = id.as_str().bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
-            (item.title.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default(), palette[h as usize % palette.len()])
+            let letter = item.title.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+            tile(palette[h as usize % palette.len()])
+                .text_size(px(18.))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(white(0.95))
+                .child(letter)
+                .into_any_element()
         }
-    };
-    div()
-        .size(px(38.))
-        .flex_none()
-        .rounded(px(9.))
-        .bg(rgb(color))
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_size(px(18.))
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(white(0.95))
-        .child(glyph)
-        .into_any_element()
+    }
 }
 
 fn action_panel(panel: &ActionPanel) -> impl IntoElement {
@@ -341,7 +334,22 @@ pub(super) fn panel_view(title: SharedString, labels: Vec<String>, selected: usi
         }))
 }
 
-fn key_hint(key: &'static str, label: &'static str) -> impl IntoElement {
+/// What a footer key cap shows.
+pub(super) enum Cap {
+    Icon(&'static str),
+    Text(&'static str),
+}
+
+/// A Lucide icon (assets.rs), tinted with `color`.
+pub(super) fn icon_svg(path: &'static str, size: f32, color: Hsla) -> gpui::Svg {
+    gpui::svg().path(path).size(px(size)).flex_none().text_color(color)
+}
+
+pub(super) fn key_hint(cap: Cap, label: &'static str) -> impl IntoElement {
+    let cap_el: AnyElement = match cap {
+        Cap::Icon(path) => icon_svg(path, 12., white(0.8)).into_any_element(),
+        Cap::Text(t) => div().text_size(px(11.)).text_color(white(0.75)).child(t).into_any_element(),
+    };
     div()
         .flex()
         .items_center()
@@ -357,28 +365,30 @@ fn key_hint(key: &'static str, label: &'static str) -> impl IntoElement {
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_size(px(11.))
-                .text_color(white(0.75))
-                .child(key),
+                .child(cap_el),
         )
         .child(div().text_color(white(0.60)).child(label))
 }
 
-/// The RedSnap button: a red rounded square inside four corner brackets.
+/// The RedSnap mark, filling its 44 px square: four corner brackets around a
+/// red rounded square. No frame or background.
 fn logo_button() -> impl IntoElement {
     let bracket = |top: bool, left: bool| {
-        let d = div().absolute().size(px(8.)).border_color(white(0.85));
-        let d = if top { d.top(px(11.)).border_t_2() } else { d.bottom(px(11.)).border_b_2() };
-        if left { d.left(px(11.)).border_l_2() } else { d.right(px(11.)).border_r_2() }
+        let d = div().absolute().size(px(13.)).border_color(white(0.9));
+        let d = if top { d.top(px(4.)).border_t(px(2.5)) } else { d.bottom(px(4.)).border_b(px(2.5)) };
+        let d = if left { d.left(px(4.)).border_l(px(2.5)) } else { d.right(px(4.)).border_r(px(2.5)) };
+        let r = px(3.);
+        match (top, left) {
+            (true, true) => d.rounded_tl(r),
+            (true, false) => d.rounded_tr(r),
+            (false, true) => d.rounded_bl(r),
+            (false, false) => d.rounded_br(r),
+        }
     };
     div()
         .relative()
         .size(px(44.))
         .flex_none()
-        .rounded(px(12.))
-        .bg(white(0.06))
-        .border_1()
-        .border_color(white(0.08))
         .flex()
         .items_center()
         .justify_center()
@@ -386,5 +396,5 @@ fn logo_button() -> impl IntoElement {
         .child(bracket(true, false))
         .child(bracket(false, true))
         .child(bracket(false, false))
-        .child(div().size(px(12.)).rounded(px(3.)).bg(rgb(RED)))
+        .child(div().size(px(18.)).rounded(px(4.)).bg(rgb(RED)))
 }

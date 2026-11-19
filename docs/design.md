@@ -42,9 +42,12 @@ about 1.25× scale, so measurements from it are divided by 1.25.
 - Clear button inside the field on the right: a 26 px circle,
   `rgba(255, 255, 255, 0.10)`, with a light "×". Shown only when the query is not
   empty.
-- To the right of the field, 12 apart: the RedSnap button, 44 × 44, radius 12,
-  fill `rgba(255, 255, 255, 0.06)`. It shows the logo (a red rounded square inside
-  four corner brackets) and opens the RedSnap menu (Settings…, Quit).
+- To the right of the field, 12 apart: the RedSnap mark, 44 × 44 with no frame
+  or background (changed 2026-11-19): four white corner brackets (13 px, 2.5 px
+  stroke, 4 px from the edges) around an 18 px red rounded square.
+- Icons are [Lucide](https://lucide.dev) (ISC), compiled into the binary
+  (`crates/app/assets/icons`) and tinted with the text color; the settings app
+  uses the same set through `lucide-react`.
 
 ## Results
 

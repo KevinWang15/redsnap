@@ -4,17 +4,18 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { type AppInfo, type AppStats, type ClipStats, type Config, type QuickLink, type Snapshot, type Snippet, type WebSearch, api, message } from './api'
+import { AppWindow, ClipboardList, Search as SearchIcon, SlidersHorizontal, SquarePen, Wrench, X } from 'lucide-react'
 import { Button, ConfirmButton, NumberField, Row, Section, ShortcutRecorder, StringList, TextArea, TextField, Toggle } from './ui'
 
 type Page = 'general' | 'search' | 'apps' | 'snippets' | 'clipboard' | 'advanced'
 
-const PAGES: { id: Page; label: string }[] = [
-  { id: 'general', label: 'General' },
-  { id: 'search', label: 'Search' },
-  { id: 'apps', label: 'Apps' },
-  { id: 'snippets', label: 'Snippets' },
-  { id: 'clipboard', label: 'Clipboard' },
-  { id: 'advanced', label: 'Advanced' },
+const PAGES: { id: Page; label: string; icon: typeof X }[] = [
+  { id: 'general', label: 'General', icon: SlidersHorizontal },
+  { id: 'search', label: 'Search', icon: SearchIcon },
+  { id: 'apps', label: 'Apps', icon: AppWindow },
+  { id: 'snippets', label: 'Snippets', icon: SquarePen },
+  { id: 'clipboard', label: 'Clipboard', icon: ClipboardList },
+  { id: 'advanced', label: 'Advanced', icon: Wrench },
 ]
 
 type Notice = { kind: 'error' | 'ok'; text: string }
@@ -75,10 +76,11 @@ export default function App() {
           <button
             key={p.id}
             onClick={() => setPage(p.id)}
-            className={`mb-0.5 h-9 rounded-lg px-3 text-left text-[14px] transition-colors ${
+            className={`mb-0.5 flex h-9 items-center gap-2.5 rounded-lg px-3 text-left text-[14px] transition-colors ${
               page === p.id ? 'bg-red-500/15 font-medium text-ink-100' : 'text-ink-300 hover:bg-white/5 hover:text-ink-100'
             }`}
           >
+            <p.icon size={16} strokeWidth={2} className={page === p.id ? 'text-red-500' : 'text-ink-400'} />
             {p.label}
           </button>
         ))}
@@ -94,8 +96,8 @@ export default function App() {
           >
             <span className="min-w-0 flex-1">{notice.text}</span>
             {notice.kind === 'error' && (
-              <button className="text-ink-400 hover:text-ink-100" onClick={() => setNotice(null)}>
-                ×
+              <button aria-label="Close" className="text-ink-400 hover:text-ink-100" onClick={() => setNotice(null)}>
+                <X size={15} />
               </button>
             )}
           </div>
@@ -120,11 +122,18 @@ function Centered({ children }: { children: React.ReactNode }) {
   return <div className="flex h-full items-center justify-center text-[14px] text-ink-400">{children}</div>
 }
 
+/** The RedSnap mark: corner brackets around a red rounded square. */
 function Logo() {
   return (
-    <span className="relative flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5">
-      <span className="h-2.5 w-2.5 rounded-[3px] bg-red-500" />
-    </span>
+    <svg width="28" height="28" viewBox="0 0 44 44" aria-hidden="true">
+      <g fill="none" stroke="rgb(255 255 255 / 0.9)" strokeWidth="2.5" strokeLinecap="round">
+        <path d="M4 15V7a3 3 0 0 1 3-3h8" />
+        <path d="M29 4h8a3 3 0 0 1 3 3v8" />
+        <path d="M40 29v8a3 3 0 0 1-3 3h-8" />
+        <path d="M15 40H7a3 3 0 0 1-3-3v-8" />
+      </g>
+      <rect x="13" y="13" width="18" height="18" rx="4" fill="#e8344e" />
+    </svg>
   )
 }
 

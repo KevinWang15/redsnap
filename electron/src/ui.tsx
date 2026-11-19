@@ -1,6 +1,7 @@
 // Small controls shared by the settings sections.
 
 import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { X } from 'lucide-react'
 import { api, message } from './api'
 import { displayShortcut, specFromEvent } from './shortcuts'
 
@@ -247,7 +248,7 @@ export function StringList({
               onClick={() => onChange(items.filter((x) => x !== it))}
               className="flex h-5 w-5 items-center justify-center rounded text-ink-400 hover:bg-white/10 hover:text-ink-100"
             >
-              ×
+              <X size={13} />
             </button>
           </span>
         ))}
