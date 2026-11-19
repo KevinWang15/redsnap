@@ -60,7 +60,8 @@ impl Default for Clipboard {
     fn default() -> Self {
         Clipboard {
             enabled: true,
-            hotkey: "Ctrl+Alt+V".into(),
+            // Alfred's clipboard shortcut is Option+Cmd+C; the same letter elsewhere.
+            hotkey: if cfg!(target_os = "macos") { "Alt+Super+C".into() } else { "Ctrl+Alt+C".into() },
             keep_days: 30,
             max_entries: 5000,
             excluded_apps: Vec::new(),
