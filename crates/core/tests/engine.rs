@@ -145,3 +145,24 @@ fn empty_query_lists_most_used_first() {
     store.flush();
     assert_eq!(search(&mut e, "", &store.snapshot())[0].item.title, "Terminal");
 }
+
+#[test]
+fn sn_lists_every_snippet_and_nothing_else() {
+    use redsnap_core::config::Snippet;
+    use redsnap_core::providers::SnippetsProvider;
+    let snippets: Vec<Snippet> = (0..80)
+        .map(|i| Snippet { id: format!("s{i}"), name: format!("Snippet {i}"), trigger: format!(";s{i}x"), text: "t".into(), auto_expand: true })
+        .collect();
+    let keywords = Keywords::new([("sn".to_string(), Target::Snippets)]);
+    let apps = vec![app("snap", "Snap Camera")];
+    let catalog = Arc::new(ArcSwap::from_pointee(AppCatalog::build(apps, &BTreeMap::new(), &[])));
+    let mut e = Engine::new(vec![Box::new(AppsProvider::new(catalog)), Box::new(SnippetsProvider::new(&snippets))], keywords);
+    let u = Arc::new(Usage::default());
+    let all = e.search("sn ", &u, NOW, 200).1;
+    assert_eq!(all.len(), 80);
+    assert!(all.iter().all(|h| h.item.id.as_str().starts_with("snippet:")));
+    let some = e.search("sn snippet 7", &u, NOW, 200).1;
+    assert!(some.iter().any(|h| h.item.title == "Snippet 7"));
+    // Without the space, "sn" is an ordinary query: the app is found too.
+    assert!(e.search("sn", &u, NOW, 200).1.iter().any(|h| h.item.title == "Snap Camera"));
+}

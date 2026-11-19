@@ -9,6 +9,8 @@ use crate::text;
 pub enum Target {
     WebSearch(String),
     QuickLink(String),
+    /// `sn …`: snippets only.
+    Snippets,
 }
 
 /// Keywords from the config, looked up by their folded form.

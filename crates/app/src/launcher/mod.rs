@@ -30,7 +30,7 @@ actions!(
 const CONTEXT: &str = "Launcher";
 pub const WIDTH: f32 = 760.;
 /// Results kept beyond the visible rows, for scrolling.
-const LIMIT: usize = 60;
+const LIMIT: usize = 200;
 
 pub fn height(rows: usize) -> f32 {
     16. + 56. + 12. + rows as f32 * 66. + 44. + 16.

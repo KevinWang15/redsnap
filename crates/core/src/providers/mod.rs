@@ -227,17 +227,17 @@ impl Provider for SnippetsProvider {
     }
 
     fn search(&self, q: &Query, cx: &mut SearchContext, out: &mut Vec<Candidate>) {
-        if q.route.is_some() || q.is_empty() {
-            return;
-        }
-        // `sn ` lists snippets only (and searches within them).
-        let (only, text) = match q.text.strip_prefix("sn ") {
-            Some(rest) => (true, rest.trim()),
+        // `sn` + space routes here: every snippet, or those matching the rest
+        // (fuzzy allowed). Ordinary queries find snippets by literal matches.
+        let (only, text) = match &q.route {
+            Some((Target::Snippets, rest)) => (true, rest.as_str()),
+            Some(_) => return,
+            None if q.is_empty() => return,
             None => (false, q.text.as_str()),
         };
         let prepared = crate::matcher::PreparedQuery::new(text);
         for (item, names) in &self.snippets {
-            if only && text.is_empty() {
+            if only && prepared.is_empty() {
                 out.push(Candidate::normal(item.clone(), crate::matcher::Match { class: MatchClass::Exact, score: 0 }));
             } else if let Some(m) = prepared.best(names, &mut cx.matcher).filter(|m| only || m.class != MatchClass::Fuzzy) {
                 out.push(Candidate::normal(item.clone(), m));

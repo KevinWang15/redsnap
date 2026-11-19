@@ -102,7 +102,9 @@ fn engine(config: &Config, catalog: Arc<ArcSwap<AppCatalog>>) -> Engine {
             .iter()
             .filter(|_| p.web_searches)
             .map(|w| (w.keyword.clone(), Target::WebSearch(w.id.clone())))
-            .chain(config.quick_links.iter().filter(|_| p.quick_links).map(|l| (l.keyword.clone(), Target::QuickLink(l.id.clone())))),
+            .chain(config.quick_links.iter().filter(|_| p.quick_links).map(|l| (l.keyword.clone(), Target::QuickLink(l.id.clone()))))
+            // Built in, after the user's keywords (one of theirs named `sn` wins).
+            .chain((!config.snippets.items.is_empty()).then(|| ("sn".to_string(), Target::Snippets))),
     );
     Engine::new(providers, keywords)
 }
