@@ -105,6 +105,8 @@ MetalToolchain` if `xcrun metal` is missing).
 | Start at login | done | LaunchAgent plist; untested | `~/.config/autostart`; untested |
 | Single instance / CLI | done | Unix socket; tested in CI | tested |
 | Settings app | done | locates `../Resources/settings/RedSnap Settings.app`; untested | locates `settings/redsnap-settings`; tested in dev mode |
+| Snippets: insert from the launcher | done | **not implemented** | **not implemented** |
+| Snippets: expand as you type | done (keyboard hook) | **not implemented** | **not implemented** |
 | Latency measured | yes (PLAN.md §7) | **no** (CI bench stalled after ~3 shows) | Xvfb only |
 
 ## macOS tasks
@@ -173,6 +175,16 @@ MetalToolchain` if `xcrun metal` is missing).
     log out / log in, and the menu bar icon's menu (it uses a template image;
     check it reads in light and dark menu bars).
 
+12. **Snippets** (docs/snippets.md): implement `redsnap_platform::snippets`
+    for macOS. Inserting: activate the previous app, then type with
+    `CGEventKeyboardSetUnicodeString` events (or paste for long text).
+    Expansion as you type: a `CGEventTap` on key-down events (needs the
+    Accessibility / Input Monitoring permission; without it, say so in
+    Settings → Snippets), decoding with the current keyboard layout
+    (`UCKeyTranslate`), resetting on clicks and app switches, skipping secure
+    input fields (`IsSecureEventInputEnabled`). Reuse
+    `redsnap_core::snippets::{Typed, Triggers, render}` as Windows does.
+
 ## Linux tasks
 
 1. **Wayland.** Today `platform::window::native()` returns `None` for Wayland
@@ -217,6 +229,13 @@ MetalToolchain` if `xcrun metal` is missing).
    "Show in folder".
 9. **Measure latency** on a real X11 desktop with a GPU, and on Wayland once
    it shows.
+
+10. **Snippets** (docs/snippets.md): on X11, inserting via XTEST (activate
+    the previous window first) and expansion as you type via the XRecord
+    extension (or XInput2 raw key events), decoding with xkbcommon. Wayland
+    gives apps no global key access; expansion is unavailable there (say so
+    in Settings → Snippets), inserting may work through the portal
+    RemoteDesktop/virtual keyboard where offered.
 
 ## Done when
 

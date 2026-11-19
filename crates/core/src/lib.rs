@@ -10,5 +10,6 @@ pub mod matcher;
 pub mod providers;
 pub mod query;
 pub mod search;
+pub mod snippets;
 pub mod text;
 pub mod usage;

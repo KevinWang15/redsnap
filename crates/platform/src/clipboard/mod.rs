@@ -7,7 +7,7 @@ use redsnap_core::clipboard::{Capture, Content};
 
 pub mod convert;
 #[cfg(windows)]
-mod windows;
+pub(crate) mod windows;
 
 #[derive(Clone, Debug)]
 pub struct ClipEvent {

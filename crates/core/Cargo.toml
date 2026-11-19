@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 arc-swap = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 log.workspace = true
 nucleo-matcher = "0.3"
 pinyin = "0.11"

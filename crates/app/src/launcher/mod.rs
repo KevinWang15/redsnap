@@ -454,6 +454,12 @@ impl Launcher {
             self.usage.record_pick(&self.query, &item.id, now_ms());
         }
         self.hide(cx);
+        if let Action::Snippet(id) = action {
+            // Typed into the app that was in front, once RedSnap has hidden.
+            let target = self.paste_target;
+            let _ = cx.global::<crate::app::Events>().0.unbounded_send(crate::app::Event::InsertSnippet(id, target));
+            return;
+        }
         execute::run(action, cx);
     }
 }

@@ -252,8 +252,12 @@ fn has(format: u32) -> bool {
 
 /// The executable name of the process that owns the clipboard.
 fn owner_app() -> Option<String> {
+    exe_name_of_window(unsafe { GetClipboardOwner() })
+}
+
+/// The executable name (`notepad.exe`) of the process owning `hwnd`.
+pub(crate) fn exe_name_of_window(hwnd: HWND) -> Option<String> {
     unsafe {
-        let hwnd = GetClipboardOwner();
         if hwnd.is_null() {
             return None;
         }
@@ -381,13 +385,35 @@ pub fn foreground() -> Option<Target> {
     (!h.is_null()).then_some(Target(h as usize))
 }
 
-pub fn paste_into(target: Target) -> Result<()> {
+/// The clipboard's text right now, for the `{{clipboard}}` snippet
+/// placeholder. Waits briefly if another app holds the clipboard.
+pub(crate) fn current_text() -> Option<String> {
+    let mut opened = false;
+    for ms in [0u64, 10, 20, 40] {
+        thread::sleep(Duration::from_millis(ms));
+        if unsafe { OpenClipboard(std::ptr::null_mut()) } != 0 {
+            opened = true;
+            break;
+        }
+    }
+    if !opened {
+        return None;
+    }
+    let _open = Open;
+    let Some(Ok(b)) = data(CF_UNICODETEXT, 4 << 20) else { return None };
+    let units: Vec<u16> = b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
+    let end = units.iter().position(|u| *u == 0).unwrap_or(units.len());
+    Some(String::from_utf16_lossy(&units[..end]))
+}
+
+/// Gives `target` the foreground back (RedSnap was in front a moment ago, so
+/// it may hand it on) and waits up to half a second for it to arrive.
+pub(crate) fn activate(target: Target) -> Result<()> {
     let hwnd = target.0 as HWND;
     unsafe {
         if IsWindow(hwnd) == 0 {
-            bail!("the app to paste into has closed");
+            bail!("the app has closed");
         }
-        // RedSnap was in front a moment ago, so it may hand the foreground on.
         SetForegroundWindow(hwnd);
         for _ in 0..50 {
             if GetForegroundWindow() == hwnd {
@@ -396,10 +422,17 @@ pub fn paste_into(target: Target) -> Result<()> {
             thread::sleep(Duration::from_millis(10));
         }
         if GetForegroundWindow() != hwnd {
-            bail!("the app to paste into didn't come back to the front; the entry is on the clipboard");
+            bail!("the app didn't come back to the front");
         }
-        // Let it settle focus inside its window before the keystroke.
-        thread::sleep(Duration::from_millis(30));
+    }
+    // Let it settle focus inside its window before keystrokes.
+    thread::sleep(Duration::from_millis(30));
+    Ok(())
+}
+
+pub fn paste_into(target: Target) -> Result<()> {
+    activate(target).map_err(|e| anyhow::anyhow!("{e}; the entry is on the clipboard"))?;
+    unsafe {
         let key = |vk: u16, up: bool| INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: INPUT_0 {

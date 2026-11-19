@@ -17,7 +17,10 @@ use gpui::{
 use redsnap_core::config::{self, Config};
 use redsnap_core::item::{Action, ItemId};
 use redsnap_core::providers::apps::{AppCatalog, AppEntry, AppsProvider};
-use redsnap_core::providers::{CalculatorProvider, CommandsProvider, OpenProvider, QuickLinksProvider, WebSearchProvider};
+use redsnap_core::providers::{
+    CalculatorProvider, CommandsProvider, OpenProvider, QuickLinksProvider, SnippetsProvider, WebSearchProvider,
+};
+use redsnap_platform::snippets::{Expander, ExpanderConfig};
 use redsnap_core::query::{Keywords, Target};
 use redsnap_core::search::{Engine, Provider};
 use redsnap_core::usage::UsageStore;
@@ -51,6 +54,8 @@ pub enum Event {
     /// A request from the settings app.
     Settings(String, Value, Reply),
     SettingsClosed,
+    /// Type a snippet into the window that was in front.
+    InsertSnippet(String, Option<redsnap_platform::clipboard::Target>),
 }
 
 /// A rescan is due on show when the catalog is older than this.
@@ -81,6 +86,9 @@ fn engine(config: &Config, catalog: Arc<ArcSwap<AppCatalog>>) -> Engine {
     if p.commands {
         let system = if p.system_commands { open::system_commands() } else { &[] };
         providers.push(Box::new(CommandsProvider::new(system)));
+    }
+    if !config.snippets.items.is_empty() {
+        providers.push(Box::new(SnippetsProvider::new(&config.snippets.items)));
     }
     if p.quick_links {
         providers.push(Box::new(QuickLinksProvider::new(config.quick_links.clone())));
@@ -125,6 +133,8 @@ struct State {
     scan_ms: i64,
     scanning: bool,
     tray: Option<Tray>,
+    /// Expands snippet triggers as they're typed (Windows).
+    expander: Option<Expander>,
     settings: SettingsHost,
     events: UnboundedSender<Event>,
     handle: WindowHandle<Launcher>,
@@ -204,6 +214,11 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
             notice.get_or_insert(format!("Clipboard history couldn't open its database: {e:#}"));
         }
 
+        let expander = Expander::start(ExpanderConfig::from_config(&config.snippets))
+            .map_err(|e| log::warn!("snippet expansion: {e:#}"))
+            .ok()
+            .flatten();
+
         let tray_events = events.clone();
         let tray = Tray::new(autostart::is_enabled(), Box::new(move |c| {
             let _ = tray_events.unbounded_send(Event::Tray(c));
@@ -232,6 +247,7 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
             scan_ms: 0,
             scanning: false,
             tray,
+            expander,
             settings: SettingsHost::default(),
             events: events.clone(),
             handle,
@@ -361,6 +377,24 @@ impl State {
                 for p in self.hotkeys.resume() {
                     log::warn!("{p}");
                 }
+            }
+            Event::InsertSnippet(id, target) => {
+                let Some(snippet) = self.config.snippets.items.iter().find(|s| s.id == id) else { return };
+                let template = snippet.text.clone();
+                let clipboard = cx.update(|cx| cx.read_from_clipboard().and_then(|i| i.text())).ok().flatten();
+                let rendered = redsnap_core::snippets::render(
+                    &template,
+                    &redsnap_core::snippets::Context { now: chrono::Local::now(), clipboard },
+                );
+                std::thread::spawn(move || {
+                    let result = match target {
+                        Some(t) => redsnap_platform::snippets::insert(t, &rendered.text, rendered.cursor_back),
+                        None => Err(anyhow::anyhow!("no app to insert into")),
+                    };
+                    if let Err(e) = result {
+                        crate::execute::fail("Inserting the snippet", e);
+                    }
+                });
             }
             Event::Tray(TrayCommand::ToggleStartAtLogin) => {
                 if let Err(e) = autostart::set(!autostart::is_enabled()) {
@@ -537,6 +571,11 @@ impl State {
         }
         if self.config.extra_app_folders != old.extra_app_folders {
             let _ = self.events.unbounded_send(Event::Rescan);
+        }
+        if self.config.snippets != old.snippets
+            && let Some(x) = &self.expander
+        {
+            x.update(ExpanderConfig::from_config(&self.config.snippets));
         }
         // Clipboard options that apply at once (retention and turning
         // capture on or off apply at the next start).

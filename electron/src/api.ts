@@ -23,6 +23,9 @@ export type ClipboardConfig = {
   showSkipped: boolean
 }
 
+export type Snippet = { id: string; name: string; trigger: string; text: string; autoExpand: boolean }
+export type Snippets = { expandAsYouType: boolean; excludedApps: string[]; items: Snippet[] }
+
 export type Config = {
   version: number
   hotkey: string
@@ -35,6 +38,7 @@ export type Config = {
   hiddenApps: string[]
   extraAppFolders: string[]
   clipboard: ClipboardConfig
+  snippets: Snippets
 }
 
 export type Snapshot = { config: Config; revision: number }

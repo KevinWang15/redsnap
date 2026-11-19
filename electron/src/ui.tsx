@@ -112,6 +112,30 @@ export function TextField({
   )
 }
 
+/** A multi-line text field that commits when it loses focus (Ctrl/Cmd+Enter too). */
+export function TextArea({ value, onCommit, placeholder, rows = 4 }: { value: string; onCommit: (v: string) => void; placeholder?: string; rows?: number }) {
+  const [draft, setDraft] = useState(value)
+  const [saved, setSaved] = useState(value)
+  if (value !== saved) {
+    setSaved(value)
+    setDraft(value)
+  }
+  return (
+    <textarea
+      value={draft}
+      rows={rows}
+      placeholder={placeholder}
+      spellCheck={false}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => draft !== value && onCommit(draft)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) (e.target as HTMLTextAreaElement).blur()
+      }}
+      className="w-full resize-y rounded-lg border border-white/10 bg-ink-950 px-2.5 py-2 font-mono text-[13px] leading-5 text-ink-100 outline-none placeholder:text-ink-600 focus:border-red-500/70"
+    />
+  )
+}
+
 export function NumberField({ value, onCommit, min, max }: { value: number; onCommit: (v: number) => void; min: number; max: number }) {
   return (
     <TextField

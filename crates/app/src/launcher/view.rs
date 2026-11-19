@@ -268,6 +268,7 @@ fn icon(item: &Item, cx: &gpui::App) -> AnyElement {
                 "refresh" => "↻",
                 "info" => "i",
                 "power" => "⏻",
+                "snippet" => "✎",
                 _ => "•",
             };
             (g.into(), 0x3A4152)

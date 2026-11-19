@@ -45,6 +45,8 @@ pub fn run(action: Action, cx: &mut App) {
         Action::OpenPath(path) => background("Opening the path", move || open::open_path(&path)),
         Action::RevealPath(path) => background("Showing the file", move || open::reveal(&path)),
         Action::System(cmd) => background("The system command", move || open::run_system(cmd)),
+        // The launcher sends snippets to the app loop (it knows the target window).
+        Action::Snippet(id) => log::warn!("snippet {id} reached execute::run"),
         Action::RedSnap(cmd) => {
             let paths = cx.global::<Shell>().paths.clone();
             match cmd {

@@ -27,6 +27,7 @@ pub enum ProviderId {
     Open,
     Apps,
     Commands,
+    Snippets,
     QuickLinks,
     WebSearch,
 }
@@ -89,6 +90,8 @@ pub enum Action {
     CopyText(String),
     System(SystemCommand),
     RedSnap(InternalCommand),
+    /// Types the snippet with this id into the app that was in front.
+    Snippet(String),
 }
 
 impl Action {
@@ -107,6 +110,7 @@ impl Action {
                 }
             }
             Action::CopyText(_) => "Copy",
+            Action::Snippet(_) => "Insert",
             Action::System(_) | Action::RedSnap(_) => "Run",
         }
     }

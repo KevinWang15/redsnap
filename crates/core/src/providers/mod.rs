@@ -5,7 +5,7 @@ pub mod apps;
 use std::sync::Arc;
 
 use crate::calc;
-use crate::config::{QuickLink, WebSearch};
+use crate::config::{QuickLink, Snippet, WebSearch};
 use crate::item::{Action, IconRef, InternalCommand, Item, ItemId, ProviderId, SystemCommand, url_allowed};
 use crate::matcher::{MatchClass, Names};
 use crate::query::{Query, Target};
@@ -185,6 +185,63 @@ impl Provider for CommandsProvider {
                 continue;
             };
             out.push(Candidate::normal(c.item.clone(), m));
+        }
+    }
+}
+
+// ----- snippets ---------------------------------------------------------------
+
+/// Snippets found by name, trigger or text; Enter types one into the app
+/// that was in front.
+pub struct SnippetsProvider {
+    snippets: Vec<(Arc<Item>, Names)>,
+}
+
+impl SnippetsProvider {
+    pub fn new(snippets: &[Snippet]) -> Self {
+        let snippets = snippets
+            .iter()
+            .map(|s| {
+                let preview: String = s.text.lines().next().unwrap_or("").chars().take(80).collect();
+                let item = Item {
+                    id: ItemId::new("snippet", &s.id),
+                    provider: ProviderId::Snippets,
+                    title: if s.name.is_empty() { s.trigger.clone() } else { s.name.clone() },
+                    subtitle: if s.trigger.is_empty() { preview } else { format!("{} · {preview}", s.trigger) },
+                    icon: IconRef::Builtin("snippet"),
+                    primary: Action::Snippet(s.id.clone()),
+                    secondary: None,
+                    learnable: true,
+                };
+                let names = Names::new(&item.title, [s.trigger.as_str()].into_iter().filter(|t| !t.is_empty()));
+                (Arc::new(item), names)
+            })
+            .collect();
+        SnippetsProvider { snippets }
+    }
+}
+
+impl Provider for SnippetsProvider {
+    fn id(&self) -> ProviderId {
+        ProviderId::Snippets
+    }
+
+    fn search(&self, q: &Query, cx: &mut SearchContext, out: &mut Vec<Candidate>) {
+        if q.route.is_some() || q.is_empty() {
+            return;
+        }
+        // `sn ` lists snippets only (and searches within them).
+        let (only, text) = match q.text.strip_prefix("sn ") {
+            Some(rest) => (true, rest.trim()),
+            None => (false, q.text.as_str()),
+        };
+        let prepared = crate::matcher::PreparedQuery::new(text);
+        for (item, names) in &self.snippets {
+            if only && text.is_empty() {
+                out.push(Candidate::normal(item.clone(), crate::matcher::Match { class: MatchClass::Exact, score: 0 }));
+            } else if let Some(m) = prepared.best(names, &mut cx.matcher).filter(|m| only || m.class != MatchClass::Fuzzy) {
+                out.push(Candidate::normal(item.clone(), m));
+            }
         }
     }
 }

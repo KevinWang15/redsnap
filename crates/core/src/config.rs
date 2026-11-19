@@ -38,6 +38,49 @@ pub struct Config {
     /// Optional in the file: added after the first release of this format.
     #[serde(default)]
     pub clipboard: Clipboard,
+    #[serde(default)]
+    pub snippets: Snippets,
+}
+
+/// Snippets (crates/core/src/snippets.rs for the template syntax).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Snippets {
+    /// Expand triggers as they're typed in any app.
+    pub expand_as_you_type: bool,
+    /// Apps where typed triggers never expand (executable or app name).
+    pub excluded_apps: Vec<String>,
+    pub items: Vec<Snippet>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Snippet {
+    pub id: String,
+    pub name: String,
+    /// Typed to expand it (`;sig`); empty: found only by searching.
+    pub trigger: String,
+    /// The template.
+    pub text: String,
+    /// Whether typing the trigger expands it (it's always searchable).
+    pub auto_expand: bool,
+}
+
+impl Default for Snippets {
+    fn default() -> Self {
+        let item = |id: &str, name: &str, trigger: &str, text: &str| Snippet {
+            id: id.into(),
+            name: name.into(),
+            trigger: trigger.into(),
+            text: text.into(),
+            auto_expand: true,
+        };
+        Snippets {
+            expand_as_you_type: true,
+            excluded_apps: Vec::new(),
+            items: vec![item("date", "Today's date", ";date", "{{date}}"), item("now", "Date and time", ";now", "{{datetime}}")],
+        }
+    }
 }
 
 /// Clipboard history (docs/clipboard.md).
@@ -139,6 +182,7 @@ impl Default for Config {
             hidden_apps: Vec::new(),
             extra_app_folders: Vec::new(),
             clipboard: Clipboard::default(),
+            snippets: Snippets::default(),
         }
     }
 }
@@ -183,8 +227,52 @@ impl Config {
         if !(10..=100_000).contains(&self.clipboard.max_entries) {
             bail!("clipboard.maxEntries: must be 10 to 100000, found {}", self.clipboard.max_entries);
         }
+        self.validate_snippets()?;
         if self.web_searches.iter().any(|w| !w.url.contains("{query}")) {
             bail!("webSearches: every URL needs {{query}}");
+        }
+        Ok(())
+    }
+
+    fn validate_snippets(&self) -> Result<()> {
+        let mut ids = HashSet::new();
+        let items = &self.snippets.items;
+        if items.len() > 2000 {
+            bail!("snippets: at most 2000");
+        }
+        for s in items {
+            let label = if s.name.is_empty() { s.trigger.as_str() } else { s.name.as_str() };
+            if s.id.trim().is_empty() || !ids.insert(s.id.as_str()) {
+                bail!("snippets: id {:?} is empty or used twice", s.id);
+            }
+            if s.trigger.chars().any(char::is_whitespace) {
+                bail!("snippet {label:?}: the trigger can't contain spaces");
+            }
+            if s.trigger.chars().count() > 64 {
+                bail!("snippet {label:?}: the trigger is longer than 64 characters");
+            }
+            if s.text.chars().count() > 100_000 {
+                bail!("snippet {label:?}: the text is longer than 100,000 characters");
+            }
+            crate::snippets::check(&s.text).map_err(|e| anyhow::anyhow!("snippet {label:?}: {e}"))?;
+        }
+        // A trigger that starts another would always fire first.
+        let triggers: Vec<&Snippet> = items.iter().filter(|s| !s.trigger.is_empty()).collect();
+        for a in &triggers {
+            for b in &triggers {
+                if a.id == b.id {
+                    continue;
+                }
+                if a.trigger == b.trigger {
+                    bail!("snippets: the trigger {:?} is used twice", a.trigger);
+                }
+                if b.trigger.starts_with(&a.trigger) && (a.auto_expand && b.auto_expand) {
+                    bail!(
+                        "snippets: the trigger {:?} is the start of {:?}, so typing {:?} would always expand {:?} first",
+                        a.trigger, b.trigger, b.trigger, a.trigger
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -392,6 +480,16 @@ mod tests {
         v.as_object_mut().unwrap().remove("clipboard");
         let c = Config::from_json(&v.to_string()).unwrap();
         assert_eq!(c.clipboard, Clipboard::default());
+    }
+
+    #[test]
+    fn snippet_validation() {
+        let mut c = Config::default();
+        c.snippets.items.push(Snippet { id: "d2".into(), name: "x".into(), trigger: ";dates".into(), text: "x".into(), auto_expand: true });
+        assert!(c.validate().unwrap_err().to_string().contains("is the start of"));
+        c.snippets.items.pop();
+        c.snippets.items.push(Snippet { id: "bad".into(), name: "Bad".into(), trigger: ";b".into(), text: "{{nope}}".into(), auto_expand: true });
+        assert!(c.validate().unwrap_err().to_string().contains("\"Bad\""));
     }
 
     #[test]

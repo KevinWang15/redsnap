@@ -3,15 +3,16 @@
 // what comes back is what's shown.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { type AppInfo, type AppStats, type ClipStats, type Config, type QuickLink, type Snapshot, type WebSearch, api, message } from './api'
-import { Button, ConfirmButton, NumberField, Row, Section, ShortcutRecorder, StringList, TextField, Toggle } from './ui'
+import { type AppInfo, type AppStats, type ClipStats, type Config, type QuickLink, type Snapshot, type Snippet, type WebSearch, api, message } from './api'
+import { Button, ConfirmButton, NumberField, Row, Section, ShortcutRecorder, StringList, TextArea, TextField, Toggle } from './ui'
 
-type Page = 'general' | 'search' | 'apps' | 'clipboard' | 'advanced'
+type Page = 'general' | 'search' | 'apps' | 'snippets' | 'clipboard' | 'advanced'
 
 const PAGES: { id: Page; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'search', label: 'Search' },
   { id: 'apps', label: 'Apps' },
+  { id: 'snippets', label: 'Snippets' },
   { id: 'clipboard', label: 'Clipboard' },
   { id: 'advanced', label: 'Advanced' },
 ]
@@ -103,6 +104,7 @@ export default function App() {
           {page === 'general' && <General c={c} set={set} save={save} />}
           {page === 'search' && <Search c={c} set={set} />}
           {page === 'apps' && <Apps c={c} set={set} />}
+          {page === 'snippets' && <SnippetsPage c={c} set={set} />}
           {page === 'clipboard' && <ClipboardPage c={c} set={set} save={save} notify={setNotice} />}
           {page === 'advanced' && <Advanced c={c} set={set} notify={setNotice} />}
         </div>
@@ -346,6 +348,92 @@ function Apps({ c, set }: Edit) {
           mono
           empty="Only the usual places."
           onChange={(items) => set((x) => ({ ...x, extraAppFolders: items }))}
+        />
+      </Section>
+    </>
+  )
+}
+
+const PLACEHOLDERS: [string, string][] = [
+  ['{{cursor}}', 'where the caret ends up'],
+  ['{{date}}', '2026-11-19'],
+  ['{{time}}', '14:05'],
+  ['{{datetime}}', '2026-11-19 14:05'],
+  ['{{date:%d/%m/%Y}}', 'any date format'],
+  ['{{clipboard}}', "the clipboard's text"],
+]
+
+function SnippetsPage({ c, set }: Edit) {
+  const s = c.snippets
+  const [filter, setFilter] = useState('')
+  const setS = (change: Partial<Config['snippets']>) => set((x) => ({ ...x, snippets: { ...x.snippets, ...change } }))
+  const setItem = (id: string, change: Partial<Snippet>) =>
+    set((x) => ({ ...x, snippets: { ...x.snippets, items: x.snippets.items.map((i) => (i.id === id ? { ...i, ...change } : i)) } }))
+  const f = filter.trim().toLowerCase()
+  const shown = s.items.filter((i) => !f || `${i.name} ${i.trigger} ${i.text}`.toLowerCase().includes(f))
+  return (
+    <>
+      <Section title="Snippets" description="Text you use often. Type a snippet's trigger in any app, or find it in RedSnap and press Enter.">
+        <Row
+          label="Expand as you type"
+          hint={window.redsnap?.platform === 'win32' ? 'Typing a trigger replaces it with its snippet.' : 'Not available on this system yet; snippets still work from RedSnap.'}
+        >
+          <Toggle label="Expand as you type" checked={s.expandAsYouType} onChange={(v) => setS({ expandAsYouType: v })} />
+        </Row>
+        <div className="px-4 py-3 text-[12px] leading-5 text-ink-400">
+          A trigger that starts with a letter expands only at the start of a word; triggers starting with a symbol, like{' '}
+          <code className="text-ink-300">;sig</code>, expand anywhere. Placeholders:{' '}
+          {PLACEHOLDERS.map(([p, what], i) => (
+            <span key={p}>
+              <code className="text-ink-300">{p}</code> {what}
+              {i < PLACEHOLDERS.length - 1 ? ', ' : '.'}
+            </span>
+          ))}
+        </div>
+      </Section>
+
+      <div className="mb-3 flex items-center gap-2">
+        <input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter snippets"
+          className="h-8 flex-1 rounded-lg border border-white/10 bg-ink-950 px-2.5 text-[13px] outline-none placeholder:text-ink-600 focus:border-red-500/70"
+        />
+        <Button
+          kind="primary"
+          onClick={() =>
+            setS({
+              items: [...s.items, { id: newId('snippet'), name: 'New snippet', trigger: '', text: '', autoExpand: true }],
+            })
+          }
+        >
+          Add snippet
+        </Button>
+      </div>
+      {shown.length === 0 && <div className="mb-8 text-[13px] text-ink-400">{s.items.length ? 'No snippet matches.' : 'No snippets yet.'}</div>}
+      {shown.map((i) => (
+        <div key={i.id} className="mb-3 rounded-xl border border-white/8 bg-ink-900 p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <TextField width="w-56" value={i.name} placeholder="Name" onCommit={(v) => setItem(i.id, { name: v })} />
+            <TextField width="w-32" value={i.trigger} placeholder="Trigger, e.g. ;sig" mono onCommit={(v) => setItem(i.id, { trigger: v.trim() })} />
+            <div className="ml-auto flex items-center gap-2 text-[12px] text-ink-400">
+              Expand as typed
+              <Toggle label="Expand as typed" checked={i.autoExpand} onChange={(v) => setItem(i.id, { autoExpand: v })} />
+            </div>
+            <Button kind="ghost" onClick={() => setS({ items: s.items.filter((x) => x.id !== i.id) })}>
+              Remove
+            </Button>
+          </div>
+          <TextArea value={i.text} placeholder="The text. Ctrl+Enter to save." onCommit={(v) => setItem(i.id, { text: v })} />
+        </div>
+      ))}
+
+      <Section title="Excluded apps" description="Triggers never expand in these apps (executable or app name). Password fields are always skipped.">
+        <StringList
+          items={s.excludedApps}
+          placeholder={window.redsnap?.platform === 'win32' ? 'WindowsTerminal.exe' : 'Terminal'}
+          empty="No apps excluded."
+          onChange={(items) => setS({ excludedApps: items })}
         />
       </Section>
     </>
