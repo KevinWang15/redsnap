@@ -178,7 +178,10 @@ MetalToolchain` if `xcrun metal` is missing).
     input fields (`IsSecureEventInputEnabled`). Reuse
     `redsnap_core::snippets::{Typed, Triggers, render}` as Windows does.
 
-12. **File search** (docs/files.md): run `cargo run -p redsnap-platform
+12. **Blur** (docs/design.md): Windows uses gpui's `Blurred` with a fill at
+    0.5. On macOS, try `Blurred` too (the native window blur, no permission
+    needed): set `LOOK` in `platform/src/window.rs` and check the corners.
+13. **File search** (docs/files.md): run `cargo run -p redsnap-platform
     --example find_files -- <words>` and check that `mdfind` answers within a
     few hundred ms. Check that names with accents and CJK characters match,
     and that `.app` bundles open as apps. Also check that `f` in the launcher

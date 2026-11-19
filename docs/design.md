@@ -6,17 +6,25 @@ about 1.25× scale, so measurements from it are divided by 1.25.
 
 ## Panel
 
-- A nearly opaque dark fill: a vertical gradient from `rgba(16, 24, 30, 0.97)`
-  at the top to `rgba(22, 18, 34, 1.0)` at the bottom (slightly teal →
-  slightly violet).
-- No blurred backdrop (removed 2026-11-19). The matte glass was a screen
-  capture blurred by RedSnap, and a still picture stays put when what's
-  behind the window scrolls. A blur would have to be the compositor's own,
-  live one.
-- The window is fully transparent outside the panel, so the panel's own 20 px
-  corners are the window's corners. Windows' own corner rounding and border
-  are off.
-- Border: 1 px `rgba(255, 255, 255, 0.10)`. Corner radius 20.
+- Fill: a vertical gradient from `rgba(16, 24, 30, a)` at the top to
+  `rgba(22, 18, 34, a + 0.04)` at the bottom (slightly teal → slightly
+  violet). The query field's own fill (below) stays nearly opaque.
+- Per OS (`redsnap_platform::window::LOOK`):
+  - Windows (picked 2026-11-19): the compositor's acrylic blurs what's behind
+    the window, live (gpui's `Blurred`: `SetWindowCompositionAttribute` with
+    `ACCENT_ENABLE_ACRYLICBLURBEHIND`). The fill is at 0.5. The acrylic fills
+    the window's rectangle, so Windows rounds the window at its only radius,
+    8 px, and the panel's corners are 8 too. Windows' own border is off.
+  - macOS and Linux: no blur yet. The fill is at 0.97, on a window that is
+    transparent outside the panel, with the panel's own 20 px corners.
+- Tried and dropped (2026-11-19):
+  - A screen capture blurred by RedSnap ("matte glass"). A still picture
+    stays put when what's behind the window scrolls.
+  - Windows 11's acrylic through `DwmSetWindowAttribute`
+    (`DWMWA_SYSTEMBACKDROP_TYPE`). It showed nothing on this pop-up window,
+    even with gpui's accent turned off.
+  - A 20 px window region with the acrylic. The region's edge is aliased.
+- Border: 1 px `rgba(255, 255, 255, 0.10)`, at the panel's corner radius.
 - A soft drop shadow outside the panel, if the OS draws one for the window.
 - Padding: 16 around the content.
 

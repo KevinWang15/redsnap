@@ -402,10 +402,10 @@ frame). That is far too slow for every hotkey press. So:
   - Windows: `WS_POPUP`, `WS_EX_TOOLWINDOW` (no taskbar button), dark mode
     attribute.
   - macOS: borderless, Accessory activation policy, `LSUIElement`.
-- Panel (docs/design.md): the window is transparent outside the panel, and gpui
-  draws the panel with its own 20 px corners and a nearly opaque fill. No blur:
-  the screen-capture matte glass was removed (a still picture doesn't follow
-  what scrolls behind the window).
+- Panel (docs/design.md): on Windows the compositor's acrylic blurs what's
+  behind, live (gpui `Blurred`), under a fill at 0.5, with Windows rounding the
+  window at 8 px. On macOS and Linux the window is transparent outside the
+  panel, and the panel has its own 20 px corners and a nearly opaque fill.
 - **Spike first (M0)**: gpui 0.2.2 has no public hide/show for a window (hiding
   the raw handle with `ShowWindow(SW_HIDE/SW_SHOW)` from outside gpui is known to
   work on Windows). Confirm

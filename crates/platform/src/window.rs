@@ -28,25 +28,36 @@ pub struct Placement {
     pub y: i32,
 }
 
+/// How the search window looks on this OS (docs/design.md).
+#[derive(Clone, Copy, Debug)]
+pub struct Look {
+    /// The compositor blurs what's behind the window, live (gpui's
+    /// `WindowBackgroundAppearance::Blurred`).
+    pub blur: bool,
+    /// The panel's corner radius, in logical pixels.
+    pub radius: f32,
+    /// The opacity of the panel's fill.
+    pub fill: f32,
+}
+
 #[cfg(target_os = "windows")]
 pub use windows::*;
 
 #[cfg(target_os = "windows")]
 mod windows {
-    use super::{Native, Placement};
-    use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
+    use super::{Look, Native, Placement};
+    use windows_sys::Win32::Foundation::{HWND, POINT};
     use windows_sys::Win32::Graphics::Dwm::{
-        DWMSBT_TRANSIENTWINDOW, DWMWA_BORDER_COLOR, DWMWA_CLOAK, DWMWA_COLOR_NONE, DWMWA_SYSTEMBACKDROP_TYPE,
-        DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DwmExtendFrameIntoClientArea, DWMWCP_DONOTROUND, DWMWCP_ROUND,
+        DWMWA_BORDER_COLOR, DWMWA_CLOAK, DWMWA_COLOR_NONE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
+        DWMWCP_ROUND,
         DwmSetWindowAttribute,
     };
     use windows_sys::Win32::Graphics::Gdi::{
-        CreateRoundRectRgn, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, SetWindowRgn,
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
     };
-    use windows_sys::Win32::UI::Controls::MARGINS;
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetCursorPos, GetWindowRect, HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOSIZE,
+        GetCursorPos, HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOSIZE,
         SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, WM_PAINT,
     };
 
@@ -54,57 +65,23 @@ mod windows {
         n.0 as HWND
     }
 
-    /// How the window's corners are shaped. Windows 11 draws its own rounded
-    /// corner and 1 px border; the panel must match it, or both show.
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    pub enum Clip {
-        /// Windows 11 rounds the window (8 px, antialiased);
-        /// its border is turned off and the panel uses the same radius.
-        Dwm,
-        /// No Windows rounding; a window region the shape of the 20 px panel.
-        /// Exact, but the edge is aliased.
-        Region,
-        /// No clipping at all: a square window (the panel draws its corners).
-        None,
-    }
+    /// The compositor's acrylic (gpui's `Blurred`) fills the window's
+    /// rectangle, so Windows rounds the window itself, at its only radius
+    /// (8 px), and the panel uses the same radius. The fill is see-through
+    /// enough for the blur; the query field stays nearly opaque.
+    pub const LOOK: Look = Look { blur: true, radius: 8.0, fill: 0.5 };
 
-    /// Windows 11's corner radius for rounded windows, in logical pixels.
-    pub const DWM_RADIUS: f32 = 8.0;
-
-    /// What the compositor draws behind the window's transparent parts.
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    pub enum Backdrop {
-        None,
-        /// Windows 11's acrylic (`DWMSBT_TRANSIENTWINDOW`): what's behind,
-        /// blurred live by DWM. 22H2 or later; older versions ignore it.
-        Acrylic,
-    }
-
-    pub fn setup(n: Native, clip: Clip, panel_radius: f32, backdrop: Backdrop) {
+    /// Dark mode, Windows' own rounded corners, and no Windows border (the
+    /// panel draws its own).
+    pub fn setup(n: Native) {
         let h = hwnd(n);
         unsafe {
-            if backdrop == Backdrop::Acrylic {
-                // The backdrop shows through the frame, so the frame covers
-                // the whole window; gpui's transparent pixels let it through.
-                let all = MARGINS { cxLeftWidth: -1, cxRightWidth: -1, cyTopHeight: -1, cyBottomHeight: -1 };
-                DwmExtendFrameIntoClientArea(h, &all);
-                let kind: i32 = DWMSBT_TRANSIENTWINDOW;
-                DwmSetWindowAttribute(h, DWMWA_SYSTEMBACKDROP_TYPE as u32, (&kind as *const i32).cast(), 4);
-            }
             let dark: i32 = 1;
             DwmSetWindowAttribute(h, DWMWA_USE_IMMERSIVE_DARK_MODE as u32, (&dark as *const i32).cast(), 4);
-            let corner = if clip == Clip::Dwm { DWMWCP_ROUND } else { DWMWCP_DONOTROUND };
+            let corner = DWMWCP_ROUND;
             DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE as u32, (&corner as *const i32).cast(), 4);
-            // Only the panel's own border shows.
             let none: u32 = DWMWA_COLOR_NONE;
             DwmSetWindowAttribute(h, DWMWA_BORDER_COLOR as u32, (&none as *const u32).cast(), 4);
-            if clip == Clip::Region {
-                let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-                GetWindowRect(h, &mut r);
-                let d = (panel_radius * scale(n) * 2.0).round() as i32;
-                let rgn = CreateRoundRectRgn(0, 0, r.right - r.left + 1, r.bottom - r.top + 1, d, d);
-                SetWindowRgn(h, rgn, 0);
-            }
         }
     }
 
@@ -178,27 +155,18 @@ mod linux {
     use x11rb::protocol::xproto::{ConfigureWindowAux, ConnectionExt, InputFocus, StackMode};
     use x11rb::rust_connection::RustConnection;
 
-    use super::{Native, Placement};
-
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    pub enum Clip {
-        Dwm,
-        Region,
-        None,
-    }
+    use super::{Look, Native, Placement};
 
     fn conn() -> Option<&'static (RustConnection, usize)> {
         static CONN: OnceLock<Option<(RustConnection, usize)>> = OnceLock::new();
         CONN.get_or_init(|| x11rb::connect(None).map_err(|e| log::warn!("x11 connect: {e}")).ok()).as_ref()
     }
 
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    pub enum Backdrop {
-        None,
-        Acrylic,
-    }
+    /// No blur yet: a nearly opaque panel with its own 20 px corners on a
+    /// transparent window.
+    pub const LOOK: Look = Look { blur: false, radius: 20.0, fill: 0.97 };
 
-    pub fn setup(_: Native, _: Clip, _: f32, _: Backdrop) {}
+    pub fn setup(_: Native) {}
 
     pub fn placement_at_cursor(_: Native, size: (f32, f32)) -> Placement {
         let Some((c, screen)) = conn() else { return Placement { x: 0, y: 0 } };
@@ -250,7 +218,7 @@ pub use macos::*;
 mod macos {
     //! macOS goes through gpui's app-level calls (see launcher.rs); these are
     //! no-ops so the shared code compiles.
-    use super::{Native, Placement};
+    use super::{Look, Native, Placement};
 
     /// Opts out of App Nap, which throttles a hidden app's timers (the bench
     /// waits between steps would stretch from milliseconds to seconds). The
@@ -264,20 +232,11 @@ mod macos {
         std::mem::forget(token);
     }
 
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    pub enum Clip {
-        Dwm,
-        Region,
-        None,
-    }
+    /// No blur yet: a nearly opaque panel with its own 20 px corners on a
+    /// transparent window.
+    pub const LOOK: Look = Look { blur: false, radius: 20.0, fill: 0.97 };
 
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    pub enum Backdrop {
-        None,
-        Acrylic,
-    }
-
-    pub fn setup(_: Native, _: Clip, _: f32, _: Backdrop) {}
+    pub fn setup(_: Native) {}
     pub fn placement_at_cursor(_: Native, _: (f32, f32)) -> Placement {
         Placement { x: 0, y: 0 }
     }
