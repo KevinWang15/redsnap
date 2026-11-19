@@ -60,7 +60,15 @@ felt instant.
 | keystroke → frame with its results | 6.29 ms | 9.78 ms | 279.9 ms (one unexplained outlier) |
 | gpui layout + paint + present | 0.61 ms | 1.35 ms | 5.63 ms |
 
-So stock painting already meets the keystroke target on a visible window: on
+The same by hand with `--paint=now`: 3 shows, 31 keystrokes.
+
+| metric | p50 | p95 | max |
+|---|---|---|---|
+| hotkey → frame presented | 1.52 ms | 1.83 ms | |
+| keystroke → frame with its results | 0.82 ms | 3.62 ms | 3.86 ms |
+| gpui layout + paint + present | 0.71 ms | 1.13 ms | 1.91 ms |
+
+Both modes felt instant. Stock painting already meets the keystroke target on a visible window: on
 average it waits half a refresh. Painting right away (bench above) removes that
 wait and leaves more headroom. Before release, find the cause of the 280 ms
 outlier (a first-time CJK font fallback load is the first suspect).
