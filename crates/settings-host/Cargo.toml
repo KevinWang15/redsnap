@@ -1,0 +1,18 @@
+[package]
+name = "redsnap-settings"
+description = "RedSnap Settings in the system webview: the same React UI as the Electron app, without a bundled browser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+interprocess = "2"
+redsnap-platform.workspace = true
+serde_json.workspace = true
+tao = "0.37"
+wry = "0.57"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }

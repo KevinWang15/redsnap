@@ -113,7 +113,11 @@ function createWindow() {
       nodeIntegration: false,
     },
   })
-  win.once('ready-to-show', () => focusWindow())
+  win.once('ready-to-show', () => {
+    focusWindow()
+    // For RedSnap's log: requested → shown.
+    call('settings.shown', { backend: 'electron' }).catch(() => {})
+  })
   // The window shows bundled files only.
   win.webContents.on('will-navigate', (e) => e.preventDefault())
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))

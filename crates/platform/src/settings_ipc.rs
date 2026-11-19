@@ -138,6 +138,23 @@ impl Session {
     }
 }
 
+/// The settings app's side: connects to the endpoint RedSnap gave it in
+/// `REDSNAP_IPC_PATH`.
+pub fn connect(path: &str) -> Result<Stream> {
+    #[cfg(windows)]
+    let stream = {
+        use interprocess::local_socket::GenericNamespaced;
+        let name = path.trim_start_matches(r"\\.\pipe\");
+        Stream::connect(name.to_ns_name::<GenericNamespaced>()?)?
+    };
+    #[cfg(unix)]
+    let stream = {
+        use interprocess::local_socket::GenericFilePath;
+        Stream::connect(path.to_fs_name::<GenericFilePath>()?)?
+    };
+    Ok(stream)
+}
+
 fn read_line(reader: &mut impl BufRead, line: &mut String) -> Result<usize> {
     line.clear();
     let n = reader.by_ref().take(MAX_LINE as u64 + 1).read_line(line)?;

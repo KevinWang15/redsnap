@@ -484,6 +484,7 @@ impl State {
     fn settings_request(&mut self, method: &str, params: Value, cx: &mut AsyncApp) -> Result<Value, String> {
         match method {
             "config.get" => Ok(self.config_json()),
+            "settings.shown" => Ok(self.settings.shown()),
             "config.save" => self.save(params, cx),
             "app.info" => Ok(json!({
                 "version": env!("CARGO_PKG_VERSION"),
