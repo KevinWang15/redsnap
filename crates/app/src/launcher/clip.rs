@@ -20,6 +20,8 @@ pub struct Clipboard {
     pub store: ClipStore,
     pub watcher: Option<Arc<Watcher>>,
     pub show_skipped: bool,
+    /// Lowercased app names whose copies are skipped.
+    pub excluded_apps: Vec<String>,
 }
 
 impl Global for Clipboard {}

@@ -1,5 +1,7 @@
 //! The running app: settings, the usage store, the engine, the search
-//! window, the tray, the hotkey, and commands from later launches.
+//! window, the tray, the shortcuts, clipboard capture, the settings app, and
+//! commands from later launches. Everything that changes at run time lives in
+//! one [`State`] owned by the event loop.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -8,11 +10,9 @@ use anyhow::Result;
 use arc_swap::ArcSwap;
 use futures::StreamExt;
 use futures::channel::mpsc::UnboundedSender;
-use global_hotkey::hotkey::HotKey;
-use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use gpui::{
-    App, AppContext, Application, Bounds, RenderImage, WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind,
-    WindowOptions, point, px, size,
+    App, AppContext, Application, AsyncApp, BorrowAppContext, Bounds, RenderImage, WindowBackgroundAppearance, WindowBounds, WindowHandle,
+    WindowKind, WindowOptions, point, px, size,
 };
 use redsnap_core::config::{self, Config};
 use redsnap_core::item::{Action, ItemId};
@@ -23,11 +23,16 @@ use redsnap_core::search::{Engine, Provider};
 use redsnap_core::usage::UsageStore;
 use redsnap_platform::instance::CliCommand;
 use redsnap_platform::paths::Paths;
+use redsnap_platform::settings_ipc::Reply;
 use redsnap_platform::tray::{Tray, TrayCommand};
 use redsnap_platform::{autostart, open, window as os};
+use serde_json::{Value, json};
 
 use crate::execute::Shell;
+use crate::hotkeys::Hotkeys;
+use crate::launcher::clip::Clipboard;
 use crate::launcher::{self, Launcher};
+use crate::settings::SettingsHost;
 
 /// Everything that reaches the app from outside gpui, in one channel.
 pub enum Event {
@@ -41,6 +46,11 @@ pub enum Event {
     Rescan,
     Scanned(Vec<AppEntry>),
     Icon(ItemId, Option<Arc<RenderImage>>),
+    /// Open (or bring forward) the settings app.
+    OpenSettings,
+    /// A request from the settings app.
+    Settings(String, Value, Reply),
+    SettingsClosed,
 }
 
 /// A rescan is due on show when the catalog is older than this.
@@ -55,11 +65,6 @@ pub struct Options {
     /// Start hidden (start at login uses this).
     pub background: bool,
 }
-
-/// The app's shared catalog of installed apps; swapped whole by a rescan (M3).
-struct Catalog(Arc<ArcSwap<AppCatalog>>);
-
-impl gpui::Global for Catalog {}
 
 fn engine(config: &Config, catalog: Arc<ArcSwap<AppCatalog>>) -> Engine {
     let p = &config.providers;
@@ -99,6 +104,32 @@ pub fn reload_apps(cx: &mut App) {
     let _ = cx.global::<Events>().0.unbounded_send(Event::Rescan);
 }
 
+/// Asks for the settings app.
+pub fn open_settings(cx: &mut App) {
+    let _ = cx.global::<Events>().0.unbounded_send(Event::OpenSettings);
+}
+
+/// What the event loop owns and changes.
+struct State {
+    paths: Paths,
+    config: Config,
+    /// Bumped on every saved change; a save based on an older one is refused.
+    revision: u64,
+    hotkeys: Hotkeys,
+    catalog: Arc<ArcSwap<AppCatalog>>,
+    usage: UsageStore,
+    /// The last scan, so alias and hidden-app changes apply without rescanning.
+    apps: Vec<AppEntry>,
+    last_scan: Option<Instant>,
+    /// When the last scan finished, for the settings app (ms since epoch).
+    scan_ms: i64,
+    scanning: bool,
+    tray: Option<Tray>,
+    settings: SettingsHost,
+    events: UnboundedSender<Event>,
+    handle: WindowHandle<Launcher>,
+}
+
 pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: futures::channel::mpsc::UnboundedReceiver<Event>) -> Result<()> {
     let loaded = config::load(&paths.config)?;
     let config = loaded.config;
@@ -111,24 +142,21 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
 
     Application::new().run(move |cx| {
         cx.set_global(Shell { paths: paths.clone() });
-        let catalog = Arc::new(ArcSwap::from_pointee(AppCatalog::empty()));
-        cx.set_global(Catalog(catalog.clone()));
         cx.set_global(Events(events.clone()));
+        let catalog = Arc::new(ArcSwap::from_pointee(AppCatalog::empty()));
         let icon_events = events.clone();
         cx.set_global(crate::icons::Icons::start(paths.cache.join("icons"), move |id, icon| {
             let _ = icon_events.unbounded_send(Event::Icon(id, icon));
         }));
         let _ = events.unbounded_send(Event::Rescan);
-        let scan_config = config.clone();
-        let mut last_scan: Option<Instant> = None;
-        let mut scanning = false;
         crate::launcher::query_field::bind_keys(cx);
         launcher::bind_keys(cx);
 
         let rows = config.rows as usize;
         let lopts = launcher::Options { rows, blur: 28., alpha: 0.8 };
         let bounds = Bounds { origin: point(px(0.), px(0.)), size: size(px(launcher::WIDTH), px(launcher::height(rows))) };
-        let engine = engine(&config, catalog);
+        let window_engine = engine(&config, catalog.clone());
+        let window_usage = usage.clone();
         let handle: WindowHandle<Launcher> = match cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -143,7 +171,7 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
                 app_id: Some("redsnap".into()),
                 ..Default::default()
             },
-            |window, cx| cx.new(|cx| Launcher::new(engine, usage, lopts, window, cx)),
+            |window, cx| cx.new(|cx| Launcher::new(window_engine, window_usage, lopts, window, cx)),
         ) {
             Ok(h) => h,
             Err(e) => {
@@ -160,78 +188,21 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
             .ok()
             .flatten();
 
-        // The global shortcut. If it's taken, RedSnap still runs (tray,
+        // The global shortcuts. If one is taken, RedSnap still runs (tray,
         // `redsnap toggle`) and says so when the window opens.
-        let manager = GlobalHotKeyManager::new().map_err(|e| log::error!("hotkeys unavailable: {e}")).ok();
-        let mut register = |spec: &str, what: &str| -> Option<u32> {
-            match (manager.as_ref(), spec.parse::<HotKey>()) {
-                (Some(m), Ok(hotkey)) => match m.register(hotkey) {
-                    Ok(()) => Some(hotkey.id()),
-                    Err(e) => {
-                        let msg = format!("The {what} shortcut {spec} is taken by another app ({e}). Change it in Settings.");
-                        log::warn!("{msg}");
-                        notice.get_or_insert(msg);
-                        None
-                    }
-                },
-                (_, Err(e)) => {
-                    notice.get_or_insert(format!("The {what} shortcut {spec:?} isn't valid ({e}). Change it in Settings."));
-                    None
-                }
-                (None, _) => None,
-            }
-        };
-        let _main_id = register(&config.hotkey, "RedSnap");
-        let clip_id = if config.clipboard.enabled { register(&config.clipboard.hotkey, "clipboard") } else { None };
-        // Keep the manager (and its registration) for the life of the app.
-        Box::leak(Box::new(manager));
-        let hk = events.clone();
-        GlobalHotKeyEvent::set_event_handler(Some(move |e: GlobalHotKeyEvent| {
-            if e.state == HotKeyState::Pressed {
-                let event = if Some(e.id) == clip_id { Event::ClipHotkey(Instant::now()) } else { Event::Hotkey(Instant::now()) };
-                let _ = hk.unbounded_send(event);
-            }
-        }));
+        let mut hotkeys = Hotkeys::new(events.clone());
+        let clip_hotkey = config.clipboard.enabled.then_some(config.clipboard.hotkey.as_str());
+        for problem in hotkeys.start(&config.hotkey, clip_hotkey) {
+            log::warn!("{problem}");
+            notice.get_or_insert(format!("{problem} Change it in Settings."));
+        }
 
         // Clipboard history: the store, and the watcher that feeds it.
-        if config.clipboard.enabled {
-            let c = &config.clipboard;
-            let limits = redsnap_core::clipboard::Limits {
-                keep_days: c.keep_days,
-                max_entries: c.max_entries as usize,
-                ..Default::default()
-            };
-            match redsnap_core::clipboard::ClipStore::open(&paths.data.join("clipboard.db"), limits) {
-                Ok(store) => {
-                    let clip_events = events.clone();
-                    let read = redsnap_platform::clipboard::ReadLimits {
-                        max_text_bytes: limits.max_text_bytes,
-                        max_image_bytes: limits.max_image_bytes,
-                    };
-                    let watcher = redsnap_platform::clipboard::Watcher::start(
-                        read,
-                        Box::new(move |e| {
-                            let _ = clip_events.unbounded_send(Event::Clip(e));
-                        }),
-                    )
-                    .map_err(|e| log::warn!("clipboard capture: {e:#}"))
-                    .ok()
-                    .flatten();
-                    if watcher.is_none() {
-                        log::info!("clipboard capture isn't available on this OS yet");
-                    }
-                    cx.set_global(crate::launcher::clip::Clipboard {
-                        store,
-                        watcher: watcher.map(Arc::new),
-                        show_skipped: c.show_skipped,
-                    });
-                }
-                Err(e) => {
-                    notice.get_or_insert(format!("Clipboard history couldn't open its database: {e:#}"));
-                }
-            }
+        if config.clipboard.enabled
+            && let Err(e) = start_clipboard(&config, &paths, &events, cx)
+        {
+            notice.get_or_insert(format!("Clipboard history couldn't open its database: {e:#}"));
         }
-        let excluded: Vec<String> = config.clipboard.excluded_apps.iter().map(|a| a.to_lowercase()).collect();
 
         let tray_events = events.clone();
         let tray = Tray::new(autostart::is_enabled(), Box::new(move |c| {
@@ -249,7 +220,22 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
             let _ = events.unbounded_send(Event::Cli(CliCommand::Show));
         }
 
-        let events_loop = events.clone();
+        let mut state = State {
+            paths: paths.clone(),
+            config,
+            revision: 1,
+            hotkeys,
+            catalog,
+            usage,
+            apps: Vec::new(),
+            last_scan: None,
+            scan_ms: 0,
+            scanning: false,
+            tray,
+            settings: SettingsHost::default(),
+            events: events.clone(),
+            handle,
+        };
         cx.spawn(async move |cx| {
             // First, outside any update: style the window and make sure it's
             // hidden. Events (the first show included) are handled after.
@@ -259,113 +245,7 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
                 os::hide(n);
             }
             while let Some(event) = rx.next().await {
-                log::debug!("event {}", match &event {
-                    Event::Hotkey(_) => "hotkey".to_string(),
-                    Event::ClipHotkey(_) => "clipboard hotkey".to_string(),
-                    Event::Clip(c) => format!("clipboard change from {:?}", c.source_app),
-                    Event::Cli(c) => format!("cli {c:?}"),
-                    Event::Tray(t) => format!("tray {t:?}"),
-                    Event::Rescan => "rescan".into(),
-                    Event::Scanned(a) => format!("scanned {} apps", a.len()),
-                    Event::Icon(id, _) => format!("icon {}", id.as_str()),
-                });
-                let visible = handle.update(cx, |l, _, _| l.visible).unwrap_or(false);
-                match event {
-                    // The shortcut toggles.
-                    Event::Hotkey(_) | Event::ClipHotkey(_) | Event::Cli(CliCommand::Toggle) if visible => {
-                        handle.update(cx, |l, _, cx| l.hide(cx)).ok();
-                    }
-                    Event::ClipHotkey(at) => launcher::show(handle, at, true, cx).await,
-                    Event::Clip(e) => {
-                        use redsnap_core::clipboard::{Capture, Skip};
-                        use redsnap_platform::clipboard::ClipEventKind;
-                        let stored = cx
-                            .update(|cx| {
-                                let Some(c) = cx.try_global::<crate::launcher::clip::Clipboard>() else { return false };
-                                match e.kind {
-                                    // RedSnap pasted an entry; it already moved to the top.
-                                    ClipEventKind::OwnWrite(_) => false,
-                                    ClipEventKind::Captured(capture) => {
-                                        let app = e.source_app.as_deref().map(str::to_lowercase);
-                                        let excluded_app = app.as_ref().is_some_and(|a| {
-                                            excluded.iter().any(|x| a == x || a.trim_end_matches(".exe") == x.trim_end_matches(".exe"))
-                                        });
-                                        let capture = if excluded_app { Capture::Skipped(Skip::ExcludedApp) } else { capture };
-                                        c.store.add(capture, e.source_app.clone(), e.at);
-                                        true
-                                    }
-                                }
-                            })
-                            .unwrap_or(false);
-                        if stored && visible {
-                            // The store commits on its own thread; look again shortly.
-                            cx.background_executor().timer(std::time::Duration::from_millis(50)).await;
-                            handle.update(cx, |l, _, cx| l.clipboard_changed(cx)).ok();
-                        }
-                    }
-                    Event::Hotkey(at) => {
-                        if last_scan.is_some_and(|t| t.elapsed() > STALE) && !scanning {
-                            let _ = events_loop.unbounded_send(Event::Rescan);
-                        }
-                        launcher::show(handle, at, false, cx).await
-                    }
-                    Event::Rescan if scanning => {}
-                    Event::Rescan => {
-                        scanning = true;
-                        let extra = scan_config.extra_app_folders.clone();
-                        let tx = events_loop.clone();
-                        cx.background_executor()
-                            .spawn(async move {
-                                let apps = redsnap_platform::apps::scan(&extra).unwrap_or_else(|e| {
-                                    log::warn!("scanning apps: {e:#}");
-                                    Vec::new()
-                                });
-                                let _ = tx.unbounded_send(Event::Scanned(apps));
-                            })
-                            .detach();
-                    }
-                    Event::Scanned(apps) => {
-                        scanning = false;
-                        last_scan = Some(Instant::now());
-                        let warm: Vec<(ItemId, redsnap_core::item::LaunchTarget)> =
-                            apps.iter().map(|a| (ItemId::new("app", &a.key), a.launch.clone())).collect();
-                        let built = AppCatalog::build(apps, &scan_config.app_aliases, &scan_config.hidden_apps);
-                        log::info!("{} apps in the catalog", built.len());
-                        cx.update(|cx| {
-                            cx.global::<Catalog>().0.store(Arc::new(built));
-                            cx.global::<crate::icons::Icons>().warm(warm);
-                        })
-                        .ok();
-                        handle.update(cx, |l, _, cx| l.apps_changed(cx)).ok();
-                    }
-                    Event::Icon(id, icon) => {
-                        cx.update(|cx| cx.global::<crate::icons::Icons>().finished(id, icon)).ok();
-                        if visible {
-                            handle.update(cx, |_, _, cx| cx.notify()).ok();
-                        }
-                    }
-                    Event::Cli(CliCommand::Toggle | CliCommand::Show) | Event::Tray(TrayCommand::Open) => {
-                        if !visible {
-                            launcher::show(handle, Instant::now(), false, cx).await;
-                        }
-                    }
-                    Event::Cli(CliCommand::Settings) | Event::Tray(TrayCommand::Settings) => {
-                        cx.update(|cx| crate::execute::run(Action::RedSnap(redsnap_core::item::InternalCommand::OpenSettings), cx)).ok();
-                    }
-                    Event::Tray(TrayCommand::ToggleStartAtLogin) => {
-                        let on = !autostart::is_enabled();
-                        if let Err(e) = autostart::set(on) {
-                            log::warn!("start at login: {e:#}");
-                        }
-                        if let Some(t) = &tray {
-                            t.set_start_at_login(autostart::is_enabled());
-                        }
-                    }
-                    Event::Cli(CliCommand::Quit) | Event::Tray(TrayCommand::Quit) => {
-                        crate::perf::write_summary();
-                        cx.update(|cx| cx.quit()).ok();
-                    }
-                }
+                state.handle(event, cx).await;
             }
         })
         .detach();
@@ -373,3 +253,304 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
     Ok(())
 }
 
+fn start_clipboard(config: &Config, paths: &Paths, events: &UnboundedSender<Event>, cx: &mut App) -> Result<()> {
+    let c = &config.clipboard;
+    let limits = redsnap_core::clipboard::Limits { keep_days: c.keep_days, max_entries: c.max_entries as usize, ..Default::default() };
+    let store = redsnap_core::clipboard::ClipStore::open(&paths.data.join("clipboard.db"), limits)?;
+    let clip_events = events.clone();
+    let read = redsnap_platform::clipboard::ReadLimits {
+        max_text_bytes: limits.max_text_bytes,
+        max_image_bytes: limits.max_image_bytes,
+    };
+    let watcher = redsnap_platform::clipboard::Watcher::start(
+        read,
+        Box::new(move |e| {
+            let _ = clip_events.unbounded_send(Event::Clip(e));
+        }),
+    )
+    .map_err(|e| log::warn!("clipboard capture: {e:#}"))
+    .ok()
+    .flatten();
+    if watcher.is_none() {
+        log::info!("clipboard capture isn't available on this OS yet");
+    }
+    cx.set_global(Clipboard {
+        store,
+        watcher: watcher.map(Arc::new),
+        show_skipped: c.show_skipped,
+        excluded_apps: c.excluded_apps.iter().map(|a| a.to_lowercase()).collect(),
+    });
+    Ok(())
+}
+
+fn err(e: anyhow::Error) -> String {
+    format!("{e:#}")
+}
+
+impl State {
+    async fn handle(&mut self, event: Event, cx: &mut AsyncApp) {
+        let handle = self.handle;
+        let visible = handle.update(cx, |l, _, _| l.visible).unwrap_or(false);
+        match event {
+            // The shortcuts toggle.
+            Event::Hotkey(_) | Event::ClipHotkey(_) | Event::Cli(CliCommand::Toggle) if visible => {
+                handle.update(cx, |l, _, cx| l.hide(cx)).ok();
+            }
+            Event::ClipHotkey(at) => launcher::show(handle, at, true, cx).await,
+            Event::Hotkey(at) => {
+                if self.last_scan.is_some_and(|t| t.elapsed() > STALE) && !self.scanning {
+                    let _ = self.events.unbounded_send(Event::Rescan);
+                }
+                launcher::show(handle, at, false, cx).await
+            }
+            Event::Clip(e) => self.clipboard_event(e, visible, cx).await,
+            Event::Rescan if self.scanning => {}
+            Event::Rescan => {
+                self.scanning = true;
+                self.push_stats();
+                let extra = self.config.extra_app_folders.clone();
+                let tx = self.events.clone();
+                cx.background_executor()
+                    .spawn(async move {
+                        let apps = redsnap_platform::apps::scan(&extra).unwrap_or_else(|e| {
+                            log::warn!("scanning apps: {e:#}");
+                            Vec::new()
+                        });
+                        let _ = tx.unbounded_send(Event::Scanned(apps));
+                    })
+                    .detach();
+            }
+            Event::Scanned(apps) => {
+                self.scanning = false;
+                self.scan_ms = crate::launcher::now_ms();
+                self.last_scan = Some(Instant::now());
+                self.apps = apps;
+                self.rebuild_catalog(cx, true);
+            }
+            Event::Icon(id, icon) => {
+                cx.update(|cx| cx.global::<crate::icons::Icons>().finished(id, icon)).ok();
+                if visible {
+                    handle.update(cx, |_, _, cx| cx.notify()).ok();
+                }
+            }
+            Event::Cli(CliCommand::Toggle | CliCommand::Show) | Event::Tray(TrayCommand::Open) => {
+                if !visible {
+                    launcher::show(handle, Instant::now(), false, cx).await;
+                }
+            }
+            Event::Cli(CliCommand::Settings) | Event::Tray(TrayCommand::Settings) | Event::OpenSettings => {
+                if let Err(e) = self.settings.open(&self.paths, &self.events) {
+                    log::warn!("opening settings: {e:#}");
+                    // Without the settings app (a bare development build), the file itself.
+                    let file = self.paths.config.join("config.json");
+                    cx.update(|cx| crate::execute::run(Action::OpenPath(file), cx)).ok();
+                }
+            }
+            Event::Settings(method, params, reply) => {
+                let result = self.settings_request(&method, params, cx);
+                if let Err(e) = &result {
+                    log::info!("settings {method}: {e}");
+                }
+                reply(result);
+            }
+            Event::SettingsClosed => {
+                log::info!("settings app closed");
+                self.settings.closed();
+                // A recorder left open when the window closed mustn't leave
+                // the shortcuts off.
+                for p in self.hotkeys.resume() {
+                    log::warn!("{p}");
+                }
+            }
+            Event::Tray(TrayCommand::ToggleStartAtLogin) => {
+                if let Err(e) = autostart::set(!autostart::is_enabled()) {
+                    log::warn!("start at login: {e:#}");
+                }
+                if let Some(t) = &self.tray {
+                    t.set_start_at_login(autostart::is_enabled());
+                }
+                self.push_config();
+            }
+            Event::Cli(CliCommand::Quit) | Event::Tray(TrayCommand::Quit) => {
+                crate::perf::write_summary();
+                self.settings.close();
+                cx.update(|cx| cx.quit()).ok();
+            }
+        }
+    }
+
+    async fn clipboard_event(&mut self, e: redsnap_platform::clipboard::ClipEvent, visible: bool, cx: &mut AsyncApp) {
+        use redsnap_core::clipboard::{Capture, Skip};
+        use redsnap_platform::clipboard::ClipEventKind;
+        let stored = cx
+            .update(|cx| {
+                let Some(c) = cx.try_global::<Clipboard>() else { return false };
+                match e.kind {
+                    // RedSnap pasted an entry; it already moved to the top.
+                    ClipEventKind::OwnWrite(_) => false,
+                    ClipEventKind::Captured(capture) => {
+                        let app = e.source_app.as_deref().map(str::to_lowercase);
+                        let excluded = app.as_ref().is_some_and(|a| {
+                            c.excluded_apps.iter().any(|x| a == x || a.trim_end_matches(".exe") == x.trim_end_matches(".exe"))
+                        });
+                        let capture = if excluded { Capture::Skipped(Skip::ExcludedApp) } else { capture };
+                        c.store.add(capture, e.source_app.clone(), e.at);
+                        true
+                    }
+                }
+            })
+            .unwrap_or(false);
+        if stored && visible {
+            // The store commits on its own thread; look again shortly.
+            cx.background_executor().timer(std::time::Duration::from_millis(50)).await;
+            self.handle.update(cx, |l, _, cx| l.clipboard_changed(cx)).ok();
+        }
+    }
+
+    /// A new catalog from the last scan and the current aliases / hidden apps.
+    fn rebuild_catalog(&mut self, cx: &mut AsyncApp, warm_icons: bool) {
+        let built = AppCatalog::build(self.apps.clone(), &self.config.app_aliases, &self.config.hidden_apps);
+        log::info!("{} apps in the catalog", built.len());
+        let warm: Vec<(ItemId, redsnap_core::item::LaunchTarget)> =
+            if warm_icons { self.apps.iter().map(|a| (ItemId::new("app", &a.key), a.launch.clone())).collect() } else { Vec::new() };
+        self.catalog.store(Arc::new(built));
+        cx.update(|cx| cx.global::<crate::icons::Icons>().warm(warm)).ok();
+        self.handle.update(cx, |l, _, cx| l.apps_changed(cx)).ok();
+        self.push_stats();
+    }
+
+    fn config_json(&self) -> Value {
+        let mut v = serde_json::to_value(&self.config).unwrap_or(Value::Null);
+        // The OS's start-at-login entry is the truth; the file mirrors it.
+        v["startAtLogin"] = json!(autostart::is_enabled());
+        json!({ "config": v, "revision": self.revision })
+    }
+
+    fn push_config(&self) {
+        self.settings.push("config.changed", self.config_json());
+    }
+
+    fn stats(&self) -> Value {
+        let apps: Vec<Value> = {
+            let mut list: Vec<(String, String)> = self.apps.iter().map(|a| (a.name.clone(), format!("app:{}", a.key))).collect();
+            list.sort_by_key(|(n, _)| n.to_lowercase());
+            list.into_iter().map(|(name, id)| json!({ "name": name, "id": id })).collect()
+        };
+        json!({ "count": self.catalog.load().len(), "lastScanMs": self.scan_ms, "scanning": self.scanning, "apps": apps })
+    }
+
+    fn push_stats(&self) {
+        self.settings.push("apps.stats", self.stats());
+    }
+
+    /// Requests from the settings app. Everything is validated here; the
+    /// settings app only renders and edits.
+    fn settings_request(&mut self, method: &str, params: Value, cx: &mut AsyncApp) -> Result<Value, String> {
+        match method {
+            "config.get" => Ok(self.config_json()),
+            "config.save" => self.save(params, cx),
+            "app.info" => Ok(json!({
+                "version": env!("CARGO_PKG_VERSION"),
+                "platform": std::env::consts::OS,
+                "configDir": self.paths.config,
+                "dataDir": self.paths.data,
+            })),
+            "hotkey.suspend" => {
+                self.hotkeys.suspend();
+                Ok(json!({}))
+            }
+            "hotkey.resume" => Ok(json!({ "problems": self.hotkeys.resume() })),
+            "hotkey.test" => {
+                let spec = params["shortcut"].as_str().ok_or("missing shortcut")?;
+                self.hotkeys.test(spec).map(|_| json!({ "ok": true }))
+            }
+            "apps.stats" => Ok(self.stats()),
+            "apps.reload" => {
+                let _ = self.events.unbounded_send(Event::Rescan);
+                Ok(json!({}))
+            }
+            "usage.reset" => self.usage.reset().map(|_| json!({})).map_err(err),
+            "clipboard.stats" => Ok(cx
+                .update(|cx| cx.try_global::<Clipboard>().map(|c| c.store.history().entries.len()))
+                .ok()
+                .flatten()
+                .map_or(json!({ "available": false }), |n| json!({ "available": true, "entries": n }))),
+            "clipboard.clear" => {
+                cx.update(|cx| {
+                    if let Some(c) = cx.try_global::<Clipboard>() {
+                        c.store.clear();
+                        c.store.flush();
+                    }
+                })
+                .ok();
+                Ok(json!({}))
+            }
+            "logs.open" => open::open_path(&self.paths.logs()).map(|_| json!({})).map_err(err),
+            "data.open" => open::open_path(&self.paths.data).map(|_| json!({})).map_err(err),
+            other => Err(format!("unknown request {other}")),
+        }
+    }
+
+    fn restore_hotkeys(&mut self, old: &Config) {
+        let clip = old.clipboard.enabled.then_some(old.clipboard.hotkey.as_str());
+        let _ = self.hotkeys.apply(&old.hotkey, clip);
+    }
+
+    /// Validates and applies a changed config: shortcuts (registered before
+    /// anything is written, rolled back if taken), start at login, providers
+    /// and keywords, app aliases and hidden apps, clipboard options. Only
+    /// then is `config.json` written and the change announced.
+    fn save(&mut self, params: Value, cx: &mut AsyncApp) -> Result<Value, String> {
+        let revision = params["revision"].as_u64().ok_or("missing revision")?;
+        if revision != self.revision {
+            return Err("stale: the settings changed meanwhile; showing the current ones".into());
+        }
+        let new = Config::from_json(&params["config"].to_string()).map_err(err)?;
+        let old = self.config.clone();
+
+        if new.hotkey != old.hotkey || new.clipboard.hotkey != old.clipboard.hotkey || new.clipboard.enabled != old.clipboard.enabled {
+            let clip = new.clipboard.enabled.then_some(new.clipboard.hotkey.as_str());
+            self.hotkeys.apply(&new.hotkey, clip)?;
+        }
+        if new.start_at_login != autostart::is_enabled() {
+            if let Err(e) = autostart::set(new.start_at_login) {
+                // Nothing of this change is kept: the shortcuts go back too.
+                self.restore_hotkeys(&old);
+                return Err(format!("start at login: {e:#}"));
+            }
+            if let Some(t) = &self.tray {
+                t.set_start_at_login(autostart::is_enabled());
+            }
+        }
+        if let Err(e) = config::save(&self.paths.config, &new) {
+            self.restore_hotkeys(&old);
+            return Err(format!("saving config.json: {e:#}"));
+        }
+        self.config = new;
+        self.revision += 1;
+
+        // Search: a new engine; aliases and hidden apps need a new catalog.
+        let engine = engine(&self.config, self.catalog.clone());
+        self.handle.update(cx, |l, _, cx| l.set_engine(engine, cx)).ok();
+        if self.config.app_aliases != old.app_aliases || self.config.hidden_apps != old.hidden_apps {
+            self.rebuild_catalog(cx, false);
+        }
+        if self.config.extra_app_folders != old.extra_app_folders {
+            let _ = self.events.unbounded_send(Event::Rescan);
+        }
+        // Clipboard options that apply at once (retention and turning
+        // capture on or off apply at the next start).
+        let c = self.config.clipboard.clone();
+        cx.update(|cx| {
+            if cx.has_global::<Clipboard>() {
+                cx.update_global::<Clipboard, _>(|clip, _| {
+                    clip.show_skipped = c.show_skipped;
+                    clip.excluded_apps = c.excluded_apps.iter().map(|a| a.to_lowercase()).collect();
+                });
+            }
+        })
+        .ok();
+        self.push_config();
+        Ok(json!({ "revision": self.revision }))
+    }
+}

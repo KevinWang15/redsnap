@@ -29,6 +29,22 @@ jobs:
             libfontconfig-dev libfreetype-dev libxcb1-dev libx11-xcb-dev libssl-dev
       - run: cargo test --workspace --locked
 
+  settings-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: electron
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+      - run: npm ci
+      - run: npx oxlint
+      - run: npm run build
+
   windows:
     runs-on: windows-latest
     steps:

@@ -162,6 +162,13 @@ impl Launcher {
         this
     }
 
+    /// Settings changed what search finds (providers, keywords).
+    pub fn set_engine(&mut self, engine: Engine, cx: &mut Context<Self>) {
+        self.engine = engine;
+        self.refresh();
+        cx.notify();
+    }
+
     /// A rescan replaced the app catalog: search again, keeping the selection.
     pub fn apps_changed(&mut self, cx: &mut Context<Self>) {
         self.refresh();

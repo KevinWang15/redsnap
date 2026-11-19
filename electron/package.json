@@ -1,0 +1,31 @@
+{
+  "name": "redsnap-settings",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "start": "electron .",
+    "package": "node scripts/package.mjs",
+    "lint": "oxlint"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "45.3.4",
+    "oxlint": "^1.90.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwindcss": "^4.3.5",
+    "typescript": "~7.0.2",
+    "vite": "^8.3.6"
+  },
+  "productName": "RedSnap Settings",
+  "description": "RedSnap's settings app (Electron + React + Tailwind), started on demand by RedSnap",
+  "main": "main/main.cjs"
+}

@@ -14,9 +14,11 @@
 
 mod app;
 mod execute;
+mod hotkeys;
 mod icons;
 mod launcher;
 mod perf;
+mod settings;
 
 use std::fs::{File, OpenOptions};
 use std::io::Write as _;

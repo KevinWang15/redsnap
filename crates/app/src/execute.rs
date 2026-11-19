@@ -48,11 +48,7 @@ pub fn run(action: Action, cx: &mut App) {
         Action::RedSnap(cmd) => {
             let paths = cx.global::<Shell>().paths.clone();
             match cmd {
-                // The settings app comes in M4; until then, the file itself.
-                InternalCommand::OpenSettings => {
-                    let file = paths.config.join("config.json");
-                    background("Opening the settings", move || open::open_path(&file));
-                }
+                InternalCommand::OpenSettings => crate::app::open_settings(cx),
                 InternalCommand::ReloadApps => crate::app::reload_apps(cx),
                 InternalCommand::About => background("Opening RedSnap's data folder", move || open::open_path(&paths.data)),
                 InternalCommand::Quit => {

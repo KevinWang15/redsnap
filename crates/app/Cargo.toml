@@ -18,4 +18,8 @@ image = { version = "0.25", default-features = false }
 log.workspace = true
 redsnap-core.workspace = true
 redsnap-platform.workspace = true
+serde_json.workspace = true
 smallvec = "1"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }

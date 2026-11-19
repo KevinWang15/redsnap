@@ -4714,7 +4714,9 @@ dependencies = [
  "log",
  "redsnap-core",
  "redsnap-platform",
+ "serde_json",
  "smallvec",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4739,6 +4741,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "dirs 6.0.0",
+ "getrandom 0.3.4",
  "icns",
  "image",
  "interprocess",
