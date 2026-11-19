@@ -6,27 +6,30 @@ about 1.25× scale, so measurements from it are divided by 1.25.
 
 ## Panel
 
-- A dark glass panel: the desktop behind it shows through blurred and darkened.
-- Fill: a vertical gradient from `rgba(16, 24, 30, 0.60)` at the top to
-  `rgba(22, 18, 34, 0.64)` at the bottom (slightly teal → slightly violet). The
-  blurred desktop must visibly show through; 0.80 looked opaque over a dark
-  desktop. The spike's `--alpha=` tunes it.
+- Matte glass, picked 2026-11-19 from three variants: the desktop under the window,
+  blurred about 28 px, shows through a dark fill.
+- Fill: a vertical gradient from `rgba(16, 24, 30, 0.80)` at the top to
+  `rgba(22, 18, 34, 0.84)` at the bottom (slightly teal → slightly violet).
+- The OS blurs are not used. Windows acrylic blurs too strongly to show anything
+  and can't be tuned. Instead, RedSnap captures the screen under the hidden
+  window just before showing it and blurs that itself (quarter resolution, three
+  box passes). The window is fully transparent outside the panel, so the panel's
+  own 20 px corners are the window's corners.
 - Border: 1 px `rgba(255, 255, 255, 0.10)`. Corner radius 20.
 - A soft drop shadow outside the panel, if the OS draws one for the window.
 - Padding: 16 around the content.
 - Backdrop per OS:
-  - macOS: native window blur (gpui `WindowBackgroundAppearance::Blurred`).
-  - Windows 11: acrylic behind the window, clipped to the rounded panel.
-    Windows rounds the window itself (8 px) with its own 1 px border; drawn
-    over that, a 20 px panel shows two corners. Either the panel uses Windows'
-    8 px radius with Windows' border off, or Windows' rounding is off and a
-    window region cuts 20 px corners (aliased). The spike has both.
-  - Windows 10 and Linux without a blurring compositor: no blur, fill alpha
-    raised to 0.94 so text stays readable on any wallpaper.
+  - Windows: the matte glass above (screen capture + our blur), Windows 10 and
+    11 alike. Windows' own corner rounding and border are off.
+  - macOS: reading the screen needs the Screen Recording permission, which a
+    launcher shouldn't ask for. Use the native window blur with its radius
+    tuned to match instead.
+  - Linux: X11 capture works without a permission; Wayland doesn't allow it, so
+    fall back to the fill alone, raised to 0.94.
 
 ## Search row
 
-- Query field: height 56, radius 12, fill `rgba(8, 12, 18, 0.55)`, border 1 px
+- Query field: height 56, radius 12, fill `rgba(11, 15, 22, 0.90)`, border 1 px
   `rgba(225, 45, 70, 0.45)` (the RedSnap red, dimmed). Text 26 px, white, with a
   1.5 px white caret. Placeholder `rgba(255, 255, 255, 0.35)`.
 - Clear button inside the field on the right: a 26 px circle,

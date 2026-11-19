@@ -322,8 +322,8 @@ impl Render for Launcher {
                             .items_center()
                             .gap(px(10.))
                             .rounded(px(12.))
-                            // Opaque: the query must read on any background.
-                            .bg(rgb(0x0B0F16))
+                            // Nearly opaque, so the query reads on any background.
+                            .bg(rgba(0x0B0F16E6))
                             .border_1()
                             .border_color(rgba(0xE12D4673))
                             .child(self.field.clone())

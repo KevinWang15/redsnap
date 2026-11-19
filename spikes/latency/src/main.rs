@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! redsnap-spike [--paint=stock|now] [--glass=matte|blur|backdrop|transparent|opaque]
-//!               [--alpha=0.6] [--blur=14]
+//!               [--alpha=0.8] [--blur=28]
 //!               [--clip=dwm|region|none] [--hotkey=Ctrl+Alt+R]
 //!               [--bench[=SHOWS]] [--onscreen] [--perf=perf.jsonl]
 //! ```
@@ -53,11 +53,12 @@ struct Args {
 fn parse_args() -> Args {
     let mut a = Args {
         paint: PaintMode::Now,
-        glass: WindowBackgroundAppearance::Blurred,
+        // Matte glass, 0.8 fill, strong blur: the look picked on 2026-11-19.
+        glass: WindowBackgroundAppearance::Transparent,
         system_backdrop: false,
-        matte: false,
-        blur: 14.,
-        alpha: 0.6,
+        matte: true,
+        blur: 28.,
+        alpha: 0.8,
         clip: os::Clip::Dwm,
         hotkey: "Ctrl+Alt+R".into(),
         bench: None,
