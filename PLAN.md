@@ -655,7 +655,8 @@ RedSnap's own changes are commits in that fork:
 6. `gpui_windows`' build script follows the target, not the host, and release
    builds use precompiled HLSL shaders committed in `src/shaders_bytes.rs`,
    guarded by a hash of the `.hlsl` sources, so a Linux cross build needs no
-   `fxc.exe`.
+   `fxc.exe`. After editing a `.hlsl` file, regenerate them from WSL with
+   the fork's `scripts/regen-windows-shaders.sh`.
 
 
 ### 6.2 Per-OS builds
