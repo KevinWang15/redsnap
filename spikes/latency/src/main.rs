@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! redsnap-spike [--paint=stock|now] [--glass=matte|blur|backdrop|transparent|opaque]
-//!               [--alpha=0.8] [--blur=28]
+//!               [--alpha=0.8] [--blur=28] [--matte-async]
 //!               [--clip=dwm|region|none] [--hotkey=Ctrl+Alt+R]
 //!               [--bench[=SHOWS]] [--onscreen] [--perf=perf.jsonl]
 //! ```
@@ -41,6 +41,7 @@ struct Args {
     glass: WindowBackgroundAppearance,
     system_backdrop: bool,
     matte: bool,
+    matte_async: bool,
     blur: f32,
     alpha: f32,
     clip: os::Clip,
@@ -57,6 +58,7 @@ fn parse_args() -> Args {
         glass: WindowBackgroundAppearance::Transparent,
         system_backdrop: false,
         matte: true,
+        matte_async: false,
         blur: 28.,
         alpha: 0.8,
         clip: os::Clip::Dwm,
@@ -91,6 +93,7 @@ fn parse_args() -> Args {
             "--hotkey" => a.hotkey = v.into(),
             "--alpha" => a.alpha = v.parse().unwrap_or(a.alpha),
             "--blur" => a.blur = v.parse().unwrap_or(a.blur),
+            "--matte-async" => a.matte_async = true,
             "--bench" => a.bench = Some(v.parse().unwrap_or(30)),
             "--onscreen" => a.onscreen = true,
             "--perf" => a.perf = v.into(),
@@ -143,6 +146,7 @@ fn main() {
             radius: if args.matte { 20. } else { panel_radius(args.clip) },
             alpha: args.alpha,
             matte: args.matte,
+            matte_async: args.matte_async,
             blur: args.blur,
         };
         let bounds = Bounds { origin: point(px(0.), px(0.)), size: size(px(launcher::WIDTH), px(launcher::HEIGHT)) };

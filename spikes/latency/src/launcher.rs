@@ -67,6 +67,11 @@ pub struct Options {
     pub matte: bool,
     /// Matte blur radius in physical pixels.
     pub blur: f32,
+    /// Matte: show at once with an opaque fill and fade the glass in when the
+    /// capture is ready (`--matte-async`). Off by default: the fade read as a
+    /// background flash, so the window waits for the capture (9-13 ms on
+    /// Windows) and opens finished.
+    pub matte_async: bool,
 }
 
 pub struct Launcher {
@@ -160,20 +165,23 @@ impl Launcher {
 
     /// Replaces the matte backdrop, freeing the old one's GPU texture.
     fn set_backdrop(&mut self, image: Option<Arc<RenderImage>>, window: &mut Window, cx: &mut Context<Self>) {
-        self.fade_from = image.as_ref().map(|_| Instant::now());
+        self.fade_from = image.as_ref().filter(|_| self.opts.matte_async).map(|_| Instant::now());
         for old in [std::mem::replace(&mut self.backdrop, image), self.stale_backdrop.take()].into_iter().flatten() {
             window.drop_image(old).ok();
         }
         cx.notify();
     }
 
-    /// The fill's opacity now: opaque until the backdrop is there, then a
-    /// 100 ms fade to `alpha` (asks for frames while it runs).
+    /// The fill's opacity now: opaque until the backdrop is there; then
+    /// `alpha`, after a 100 ms fade in async mode (asks for frames meanwhile).
     fn fill_alpha(&self, window: &mut Window) -> f32 {
         if !self.opts.matte {
             return self.opts.alpha;
         }
-        let Some(from) = self.fade_from else { return 1.0 };
+        if self.backdrop.is_none() {
+            return 1.0;
+        }
+        let Some(from) = self.fade_from else { return self.opts.alpha };
         let t = (from.elapsed().as_secs_f32() / FADE_SECS).min(1.0);
         if t < 1.0 {
             window.request_animation_frame();
@@ -264,8 +272,14 @@ pub async fn show(handle: WindowHandle<Launcher>, this: WeakEntity<Launcher>, st
     }
     let Some(n) = native else { return };
     os::place(n, os::placement_at_cursor(n, (WIDTH, HEIGHT)));
-    if opts.matte {
+    if opts.matte && opts.matte_async {
         os::set_capture_excluded(n, true);
+    } else if opts.matte {
+        // The window is still hidden, so it isn't in the capture.
+        let (image, captured, total) = capture_and_blur(n, opts);
+        perf::record("backdrop_capture", captured);
+        perf::record("backdrop_capture_blur", total);
+        handle.update(cx, |launcher, window, cx| launcher.set_backdrop(image, window, cx)).ok();
     }
     if opts.cloaked {
         os::set_cloaked(n, true);
@@ -282,7 +296,7 @@ pub async fn show(handle: WindowHandle<Launcher>, this: WeakEntity<Launcher>, st
         os::show(n);
     }
     perf::record("show_calls", started.elapsed().as_secs_f64() * 1000.0);
-    if opts.matte {
+    if opts.matte && opts.matte_async {
         load_backdrop(handle, n, opts, show, started, cx);
     }
     // No `window.activate_window()` on Windows: gpui's version replays its
@@ -296,23 +310,26 @@ pub async fn show(handle: WindowHandle<Launcher>, this: WeakEntity<Launcher>, st
     }
 }
 
-/// Captures and blurs the screen under the window on a background thread,
+/// The blurred screen under the window, with the capture and the total time
+/// in ms. Bench runs blur a synthetic picture and never read the screen.
+fn capture_and_blur(n: Native, opts: Options) -> (Option<Arc<RenderImage>>, f64, f64) {
+    let t = Instant::now();
+    let shot = if opts.bench {
+        let (w, h) = os::physical_size(n);
+        Some((w, h, backdrop::synthetic(w, h)))
+    } else {
+        os::capture_behind(n)
+    };
+    let captured = t.elapsed().as_secs_f64() * 1000.0;
+    let image = shot.map(|(w, h, bgra)| backdrop::blur(w, h, &bgra, opts.blur));
+    (image, captured, t.elapsed().as_secs_f64() * 1000.0)
+}
+
+/// Async mode: captures and blurs the screen under the window on a background thread,
 /// after the window is already up (it is excluded from captures), then hands
 /// the picture to the launcher, which fades its fill down to show it.
 fn load_backdrop(handle: WindowHandle<Launcher>, n: Native, opts: Options, show: u64, started: Instant, cx: &mut AsyncApp) {
-    let work = cx.background_executor().spawn(async move {
-        let t = Instant::now();
-        // Bench runs never read the real screen.
-        let shot = if opts.bench {
-            let (w, h) = os::physical_size(n);
-            Some((w, h, backdrop::synthetic(w, h)))
-        } else {
-            os::capture_behind(n)
-        };
-        let captured = t.elapsed().as_secs_f64() * 1000.0;
-        let image = shot.map(|(w, h, bgra)| backdrop::blur(w, h, &bgra, opts.blur));
-        (image, captured, t.elapsed().as_secs_f64() * 1000.0)
-    });
+    let work = cx.background_executor().spawn(async move { capture_and_blur(n, opts) });
     cx.spawn(async move |cx| {
         let (image, captured, total) = work.await;
         // Read; screenshots may see RedSnap again.
