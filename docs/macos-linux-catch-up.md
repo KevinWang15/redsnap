@@ -51,7 +51,7 @@ Logs: `<profile>/data/logs/redsnap.log` (`RUST_LOG=redsnap=debug` for more).
 
 Linux build dependencies (Debian/Ubuntu): `libxkbcommon-x11-dev libwayland-dev
 libvulkan-dev libfontconfig-dev libfreetype-dev libxcb1-dev libx11-xcb-dev
-libssl-dev libwebkit2gtk-4.1-dev libgtk-3-dev`, plus a Vulkan driver (Mesa; software `lavapipe` works for testing).
+libssl-dev`, plus a Vulkan driver (Mesa; software `lavapipe` works for testing).
 macOS: Xcode (gpui compiles Metal shaders; `xcodebuild -downloadComponent
 MetalToolchain` if `xcrun metal` is missing).
 

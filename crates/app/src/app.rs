@@ -1,5 +1,5 @@
 //! The running app: settings, the usage store, the engine, the search
-//! window, the tray, the shortcuts, clipboard capture, the settings app, and
+//! window, the tray, the shortcuts, clipboard capture, the settings window, and
 //! commands from later launches. Everything that changes at run time lives in
 //! one [`State`] owned by the event loop.
 
@@ -49,7 +49,7 @@ pub enum Event {
     Rescan,
     Scanned(Vec<AppEntry>),
     Icon(ItemId, Option<Arc<RenderImage>>),
-    /// Open (or bring forward) the settings app.
+    /// Open (or bring forward) the settings window.
     OpenSettings,
     /// A request from the settings window.
     Settings(String, Value, Reply),
@@ -124,7 +124,7 @@ pub fn reload_apps(cx: &mut App) {
     let _ = cx.global::<Events>().0.unbounded_send(Event::Rescan);
 }
 
-/// Asks for the settings app.
+/// Asks for the settings window.
 pub fn open_settings(cx: &mut App) {
     let _ = cx.global::<Events>().0.unbounded_send(Event::OpenSettings);
 }
@@ -141,7 +141,7 @@ struct State {
     /// The last scan, so alias and hidden-app changes apply without rescanning.
     apps: Vec<AppEntry>,
     last_scan: Option<Instant>,
-    /// When the last scan finished, for the settings app (ms since epoch).
+    /// When the last scan finished, for the settings window (ms since epoch).
     scan_ms: i64,
     scanning: bool,
     tray: Option<Tray>,
@@ -496,8 +496,8 @@ impl State {
         self.settings.push(cx, "apps.stats", self.stats());
     }
 
-    /// Requests from the settings app. Everything is validated here; the
-    /// settings app only renders and edits.
+    /// Requests from the settings window. Everything is validated here; the
+    /// window only renders and edits.
     fn settings_request(&mut self, method: &str, params: Value, cx: &mut AsyncApp) -> Result<Value, String> {
         match method {
             "config.get" => Ok(self.config_json()),

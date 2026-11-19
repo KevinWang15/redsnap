@@ -1,5 +1,5 @@
-//! `config.json`: the settings, owned by the native process. The settings app
-//! edits them through IPC; this module validates, loads and saves.
+//! `config.json`: the settings, owned by the app loop. The settings window
+//! edits them through requests to it; this module validates, loads and saves.
 //!
 //! Decoding is strict: unknown fields and duplicate keys are errors. A
 //! malformed file is never overwritten silently: it is moved aside, the last

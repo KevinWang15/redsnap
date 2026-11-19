@@ -35,14 +35,11 @@ This document has these parts:
     Rust behind the `Platform` trait.
 - **Hosting and CI: GitHub**, with GitHub Actions on `ubuntu-latest`,
   `windows-latest` and `macos-latest`. Releases come from `vX.Y.Z` tags.
-- **The settings window is gpui, in RedSnap's own process** (2026-11-19),
-  built from the fork's components (`gpui::components`). It replaced a web UI
-  (React in Electron, then in the system webview through wry), and with it
-  the separate settings process and its private channel. The window sends the
-  same requests as before (`config.get`, `config.save` with its revision,
-  shortcut suspend/test/resume) over the app's event channel, and the app loop
-  still validates and applies every change. Where this plan still says
-  "Electron" or "the settings app", read "the settings window".
+- **The settings window is gpui too, in RedSnap's own process**, built from
+  the fork's components (`gpui::components`). It sends requests (`config.get`,
+  `config.save` with its revision, shortcut suspend/test/resume) to the app
+  loop over the app's event channel, and the app loop validates and applies
+  every change (§4.5).
 
 ---
 
@@ -76,9 +73,9 @@ Non-goals for now (each one was expensive and gave little value before):
 
 | Phase | Theme | Contents |
 |---|---|---|
-| **1** | Core launcher | Search window, app search + launch on all three OSes, calculator, web searches and quick links, open URL/path, RedSnap and system commands, action panel, learned ranking, tray, hotkey, start at login, single instance, Electron settings. Then clipboard history (native view, it needs the same instant search) with paste into the previous app ([docs/clipboard.md](docs/clipboard.md)). |
+| **1** | Core launcher | Search window, app search + launch on all three OSes, calculator, web searches and quick links, open URL/path, RedSnap and system commands, action panel, learned ranking, tray, hotkey, start at login, single instance, the settings window. Then clipboard history (native view, it needs the same instant search) with paste into the previous app ([docs/clipboard.md](docs/clipboard.md)). |
 | 2 | Snippets and files | Snippets with text expansion ([docs/snippets.md](docs/snippets.md)), file search (Everything on Windows, Spotlight on macOS, plocate on Linux) and folder browsing ([docs/files.md](docs/files.md)). |
-| 3 | Extensions | Plugin protocol (JSON-RPC over stdio, long-lived process option), window switcher, per-plugin hotkeys, plugin management pages in Electron. |
+| 3 | Extensions | Plugin protocol (JSON-RPC over stdio, long-lived process option), window switcher, per-plugin hotkeys, plugin management pages in the settings window. |
 
 Phase 1 is the subject of the rest of this document. Phases 2 and 3 appear only
 where phase 1 must leave room for them.
@@ -173,56 +170,42 @@ Designed in [docs/clipboard.md](docs/clipboard.md). The two rules that matter:
 ### 4.1 Repository layout
 
 ```
-Cargo.toml                 workspace (resolver 3, edition 2024)
+Cargo.toml                 workspace (resolver 3, edition 2024); gpui from the fork (§6.1)
 crates/
-  core/        redsnap-core: no OS or UI code
-    query.rs       parse input → Query { text, keyword route, normalized forms }
-    matcher.rs     nucleo-matcher wrapper, match classes, haystack variants
-    pinyin.rs      pinyin/initials haystacks for CJK names (built at index time)
-    item.rs        Item, ItemId, Icon ref, Action, ActionKind
-    provider.rs    Provider trait, SearchContext
-    session.rs     SearchSession: generation, merge, rank, top-K, selection by id
-    rank.rs        sort key, learned-ranking boosts
-    usage.rs       usage store (SQLite, single owner thread, publish after commit)
-    calc.rs        expression parser/evaluator (f64), formatting
-    providers/     apps.rs (over an AppCatalog), commands.rs, web.rs, links.rs,
-                   open.rs, calc.rs
+  core/        redsnap-core: no OS or UI code, tested anywhere
+    query.rs       parse input → Query { text, prepared matcher input, keyword route }
+    matcher.rs     nucleo-matcher, match classes, names with pinyin spellings
+    text.rs        folding, acronyms, pinyin forms
+    search.rs      Provider trait, Engine, ranking
+    item.rs        Item, ItemId, IconRef, typed Action
+    providers/     apps.rs (over an AppCatalog); mod.rs: calculator, open URL,
+                   commands, snippets, web searches, quick links
+    files.rs       file search and folder browsing: requests and rows (no IO)
+    calc.rs        expression parser/evaluator
+    usage.rs       usage store (SQLite, single owner thread, snapshot after commit)
+    clipboard.rs   clipboard store (docs/clipboard.md)
+    snippets.rs    snippet templates and trigger matching (docs/snippets.md)
     config.rs      Config schema, validation, defaults, atomic save/load
-    protocol.rs    native ↔ Electron message types (serde)
-  platform/    redsnap-platform: every OS call, behind `trait Platform`
-    lib.rs         trait + shared types (AppEntry, LaunchTarget, IconBytes…)
-    windows.rs     AppsFolder enumeration, Shell icons, ShellExecute, Run key,
-                   window show/hide/cloak, AllowSetForegroundWindow, session events
-    macos.rs       app bundle scan + displayName, NSWorkspace icons/launch,
-                   LaunchAgent, window order/activation, Accessory policy
-    linux.rs       XDG .desktop parsing, icon theme lookup, spawn, autostart
-                   .desktop, X11 window ops
-    watch.rs       app folder watching (notify crate) with debounce
-    instance.rs    single-instance + IPC endpoint (named pipe / Unix socket)
+  platform/    redsnap-platform: every OS call, per OS behind the same functions
+    window.rs      show/hide/place/cloak/paint the pre-created window, the look
+    apps/          app discovery and icons (windows.rs, macos.rs, linux.rs)
+    clipboard/     capture, write, paste into the previous app (Windows)
+    files/         the files thread, folder listing, per-OS index (Everything,
+                   Spotlight, plocate)
+    snippets/      expansion as you type, inserting (Windows)
+    autostart.rs, instance.rs (single instance + CLI endpoint), open.rs,
+    paths.rs, tray.rs, icon.rs (the RedSnap mark and app icon, drawn in code)
   app/         redsnap (binary): the gpui frontend and process owner
-    main.rs        startup, logging, panic hook, CLI subcommands
-    state.rs       AppState global: config, catalog, usage handle, session
-    launcher/      window.rs (pre-created window, show/hide/placement)
-                   query_field.rs (text input with IME)
-                   results.rs (virtualized list), action_panel.rs, empty_state.rs
-    theme.rs       gpui Theme built from shared tokens
-    icons.rs       icon loading/caching for visible rows
-    tray.rs, hotkey.rs
-    ipc_server.rs  accepts CLI clients and the Electron client
-    settings_host.rs  start/focus/stop the Electron process
-    executor.rs    runs Actions off the UI thread
-    demo.rs        demo mode (feature-gated, §6.3)
-electron/      RedSnap Settings: Electron + React + TypeScript + Vite
-  src/main/        main.ts (single-instance lock, window), ipc.ts (socket client)
-  src/preload/     contextBridge API, nothing else exposed
-  src/renderer/    pages: General, Search, Advanced; shortcut recorder
-  scripts/package.mjs
-shared/
-  theme/tokens.json        one color/spacing source for gpui and CSS
-  protocol/fixtures/*.json messages both sides must parse (round-trip tests)
-packaging/                 icons (svg master → png/ico/icns), Info.plist,
-                           .desktop file
-scripts/                   build-<os>, package-<os>, regen-shaders, demo harness
+    main.rs        startup, logging, CLI subcommands
+    app.rs         the event loop and its State: config, catalog, usage, hotkeys
+    launcher/      the search window: view.rs, query_field.rs (IME), clip.rs
+                   (clipboard view)
+    settings/      the settings window: view.rs, pages.rs, widgets.rs
+    hotkeys.rs, icons.rs (icon loading and disk cache), execute.rs (runs
+    actions off the UI thread), perf.rs (latency log), assets.rs (Lucide SVGs)
+packaging/icons            the app icon (.ico/.png, made by examples/make_icons.rs)
+docs/                      design.md, clipboard.md, snippets.md, files.md,
+                           macos-linux-catch-up.md
 ```
 
 `core` is where most logic and tests live. `platform` is thin and only translates
@@ -237,7 +220,7 @@ OS calls. `app` binds them to gpui and owns the process.
 | Icon loader | background pool (2 threads) | extracting icons, the disk icon cache |
 | Usage store | dedicated thread | the SQLite connection; in-memory boost map published after each commit |
 | Executor | background | launching apps, opening URLs, system commands |
-| IPC server | background | the socket/pipe; forwards decoded messages to UI through a channel |
+| Instance endpoint | background | the socket/pipe for `redsnap toggle` and the like; forwards commands through a channel |
 
 Messages between threads use typed channels (`futures::channel::mpsc` into a
 `cx.spawn` loop on the UI side). No window messages, no shared mutable state
@@ -308,58 +291,38 @@ All actions are typed. URLs are restricted to http(s) and a short list of OS
 settings schemes at the point where they are executed. Nothing builds a shell
 command line from strings.
 
-### 4.5 Native ↔ settings app
+### 4.5 Settings window ↔ app loop
 
-- **Transport**: the same local endpoint the single instance uses.
-  - Windows: named pipe `\\.\pipe\redsnap-<user SID>`.
-  - macOS/Linux: Unix socket in the runtime dir (`$XDG_RUNTIME_DIR` or the app
-    data dir), mode 0600.
-  - Implemented with the `interprocess` crate on the Rust side and `net.connect`
-    on the Electron side.
-- **Framing**: NDJSON. One message is at most 1 MiB; a longer line closes the
-  connection.
-  - Request: `{"id": 7, "method": "config.save", "params": {...}}`
-  - Response: `{"id": 7, "result": {...}}` or `{"id": 7, "error": {"code", "message", "field"?}}`
-  - Event from native: `{"event": "config.changed", "params": {...}}`
-- **Roles**:
-  - The CLI client says `{"method": "cli", "params": {"command": "toggle"}}` and
-    may only send show, toggle, settings or quit.
-  - The Electron client must send `hello` with the token first. Native generates
-    the token per launch and passes it in the environment (`REDSNAP_IPC_TOKEN`,
-    `REDSNAP_IPC_PATH`), never on the command line.
-- **Methods (phase 1)**:
-  - `hello`, `config.get` → `{config, revision}`
+- The settings window (`crates/app/src/settings`) is a gpui window in the same
+  process. It sends requests to the app loop as `Event::Settings(method,
+  params, reply)` on the app's event channel; the loop answers through the
+  reply.
+- **Methods**:
+  - `config.get` → `{config, revision}`
   - `config.save {config, revision}` → `{revision}` or a stale/validation error
-  - `hotkey.suspend` / `hotkey.resume` (while the shortcut recorder is focused)
+  - `hotkey.suspend` / `hotkey.resume` (while the shortcut recorder listens)
   - `hotkey.test {shortcut}` → available or not
-  - `usage.reset`, `apps.reload`, `apps.stats`, `logs.open`
-  - `app.version`
-- **Events**: `config.changed`, `apps.stats`, `navigate {page}` (open a page in the
-  running settings window).
-- **Authority**: native owns `config.json`.
-  1. Electron sends a full config with the revision it started from.
-  2. Native rejects a stale revision, then validates and normalizes.
-  3. Native applies side effects that can fail (hotkey registration, start at
+  - `usage.reset`, `apps.reload`, `apps.stats`, `clipboard.stats`,
+    `clipboard.clear`, `logs.open`, `data.open`, `app.info`
+- **Events** pushed to the open window: `config.changed`, `apps.stats`.
+- **Authority**: the app loop owns `config.json`.
+  1. The window sends a full config with the revision it started from.
+  2. The loop rejects a stale revision, then validates and normalizes.
+  3. It applies side effects that can fail (hotkey registration, start at
      login) and rolls back on failure.
-  4. Only then does it write the file and broadcast `config.changed`.
-- **Lifecycle**:
-  - The settings app starts on demand. Native spawns the Electron executable
-    found next to its own binary (or `REDSNAP_SETTINGS_BIN` in dev builds).
-  - If Electron is already running, native sends `navigate` instead of spawning.
-  - Electron quits when its window closes, and also when the socket closes, so
-    it never outlives a crashed native process.
-- `shared/protocol/fixtures` holds one JSON file per message. Rust and TS tests
-  both parse every fixture, so the two sides can't drift apart.
+  4. Only then does it write the file and push `config.changed`.
+- **Lifecycle**: the window opens on demand (tray, the RedSnap Settings
+  command, `redsnap settings`) and is brought forward if already open. When it
+  closes, suspended shortcuts are resumed.
 
 ### 4.6 Config and data locations
 
 | File | Location | Owner |
 |---|---|---|
-| `config.json` | `dirs::config_dir()/redsnap/` | native (Electron edits through IPC) |
+| `config.json` | `dirs::config_dir()/redsnap/` | the app loop (the settings window edits through requests) |
 | `usage.db` (SQLite) | `dirs::data_local_dir()/redsnap/` | usage thread |
 | `icons/` (PNG cache) | `dirs::cache_dir()/redsnap/icons/` | icon loader |
 | `redsnap.log`, `crash.log` | `dirs::data_local_dir()/redsnap/logs/` | native |
-| Electron `userData` | `dirs::data_local_dir()/redsnap/settings-ui/` | Electron |
 
 `config.json` has a `"version": 1` field. Phase 1 reads only the current version;
 there are no users yet, so no migration code until a release needs it.
@@ -428,8 +391,6 @@ spawned task after the current update returns. Tray menus are shown the same way
     message. Without that, the primary can't take focus.
   - The settings window must not be owned by the launcher window, or Windows
     keeps one above the other.
-  - Native calls `AllowSetForegroundWindow(ASFW_ANY)` before it spawns or signals
-    Electron.
 - **macOS**: call `cx.activate(true)` before ordering the window front. After any
   style mask change call `makeFirstResponder` on the view, or keys produce a beep.
   - When hiding without launching anything, hide the app (`NSApp.hide`) so focus
@@ -604,9 +565,9 @@ keystroke. The risk is gpui's frame cost, which M0 measures against them.
 - **While the recorder field in Settings is focused**, native suspends its hotkeys
   (`hotkey.suspend`). That way pressing the current shortcut records it instead of
   toggling the launcher.
-  - The recorder reads keys in Electron's `before-input-event`. On Windows, Alt+Space
-    in a framed window opens the system menu; test this early and, if needed, have
-    native register the chord temporarily to capture it.
+  - The recorder reads gpui key events in the settings window. On Windows,
+    Alt+Space in a framed window may open the system menu; check it, and if it
+    does, register the chord temporarily to capture it.
 - **Wayland**: no global grabs. Use the `redsnap toggle` CLI bound in the
   desktop's shortcut settings. The XDG GlobalShortcuts portal can come later where
   the desktop supports it.
@@ -701,9 +662,9 @@ RedSnap's own changes are commits in that fork:
 
 | OS | Build | Package (phase 1) |
 |---|---|---|
-| Linux | native `cargo build`; needs `libxkbcommon-x11-dev`, `libwayland-dev`, `libvulkan-dev`, `libfontconfig-dev`, `libdbus-1-dev` | `tar.gz` with binary, `settings/`, `.desktop` file and icons; AppImage later |
+| Linux | native `cargo build`; needs `libxkbcommon-x11-dev`, `libwayland-dev`, `libvulkan-dev`, `libfontconfig-dev`, `libdbus-1-dev` | `tar.gz` with binary, `.desktop` file and icons; AppImage later |
 | Windows | native MSVC on the GitHub `windows-latest` runner (fxc from the Windows SDK) for releases; cross-build from Linux with `x86_64-pc-windows-gnu` + mingw-w64 and precompiled shaders for local iteration | zip (per-user copy to `%LOCALAPPDATA%\Programs\RedSnap`); installer in phase 2 |
-| macOS | GitHub `macos-latest` runner (Metal shaders need Xcode); universal binary via `lipo` of arm64 + x86_64 | `RedSnap.app` (`LSUIElement`, icon, nested settings app), ad-hoc signed or with a Developer ID from CI secrets, zipped |
+| macOS | GitHub `macos-latest` runner (Metal shaders need Xcode); universal binary via `lipo` of arm64 + x86_64 | `RedSnap.app` (`LSUIElement`, icon), ad-hoc signed or with a Developer ID from CI secrets, zipped |
 
 - The exe icon is embedded with `embed-resource`, generated from
   `packaging/icon.svg`.
@@ -717,7 +678,6 @@ RedSnap's own changes are commits in that fork:
 - **platform**: tests against fixture trees: sample `.desktop` files (locale names,
   `NoDisplay`, `OnlyShowIn`, field codes) and sample `.app` bundles with
   `Info.plist`. The Windows enumeration code is tested on Windows only.
-- **protocol**: every file in `shared/protocol/fixtures` parsed by both Rust and TS.
 - **Demo mode** (feature `demo`):
   - `REDSNAP_DEMO_CATALOG=<json>` replaces app discovery. `REDSNAP_DEMO_LAYOUT=<dir>`
     makes the window write its control bounds as JSON.
@@ -725,11 +685,11 @@ RedSnap's own changes are commits in that fork:
     and captures only RedSnap's window. Uses: screenshots for UI review,
     latency runs, and regression checks (type `wx` → 微信 is row 1).
   - It never captures or sends input to the user's own desktop.
-- **Electron**: `node --test` for main-process logic; `--capture=<png>` renders a
-  page off-screen for visual checks under `xvfb-run`.
+- **Settings window**: the same Xvfb harness opens it (`redsnap settings`),
+  clicks through the pages and checks what `config.json` ends up with.
 - CI is GitHub Actions in the GitHub repo (`ubuntu-latest`, `windows-latest`,
   `macos-latest`). It runs `cargo test --workspace`, clippy and fmt on all three
-  OSes, plus the Electron tests, and builds the packages. A `vX.Y.Z` tag builds the
+  OSes and builds the packages. A `vX.Y.Z` tag builds the
   three packages and attaches them to a GitHub Release.
 
 ---
@@ -783,7 +743,7 @@ shows).
 | M1 | **Core engine** | Query, matcher + pinyin, ranking, usage store, calculator, phase-1 providers over a fixture catalog; benches meet §5.10 on Linux. |
 | M2 | **Launcher UI on Linux** | Window, query field, results, action panel, theme, empty state, tray (ksni), hotkey, single instance + CLI, start at login, demo harness running. |
 | M3 | **Platform backends** | App discovery, icons and launch on Windows, macOS and Linux; system commands; session lock hide. |
-| M4 | **Settings app** | Electron app, IPC protocol, config ownership with revisions, shortcut recorder with suspend, all settings applied live. |
+| M4 | **Settings window** | All pages, config ownership with revisions, shortcut recorder with suspend, all settings applied live. |
 | M5 | **Clipboard history** | docs/clipboard.md on Windows, macOS and X11: capture with every copy accounted for, literal search, preview, paste back. |
 | M6 | **Packaging + CI + dogfood** | Packages for three OSes from CI; budgets met on a real Windows and Mac machine; a week of daily use without a crash. |
 
