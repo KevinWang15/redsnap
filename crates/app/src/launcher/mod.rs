@@ -24,7 +24,7 @@ use query_field::{QueryChanged, QueryField};
 
 actions!(
     launcher,
-    [SelectNext, SelectPrev, PageDown, PageUp, Run, RunSecondary, ToggleActions, Dismiss, Run1, Run2, Run3, Run4, Run5, Run6, Run7, Run8, Run9]
+    [SelectNext, SelectPrev, PageDown, PageUp, PreviewDown, PreviewUp, Run, RunSecondary, ToggleActions, Dismiss, Run1, Run2, Run3, Run4, Run5, Run6, Run7, Run8, Run9]
 );
 
 const CONTEXT: &str = "Launcher";
@@ -45,6 +45,8 @@ pub fn bind_keys(cx: &mut gpui::App) {
         KeyBinding::new("ctrl-p", SelectPrev, c),
         KeyBinding::new("pagedown", PageDown, c),
         KeyBinding::new("pageup", PageUp, c),
+        KeyBinding::new("shift-pagedown", PreviewDown, c),
+        KeyBinding::new("shift-pageup", PreviewUp, c),
         KeyBinding::new("enter", Run, c),
         KeyBinding::new("secondary-enter", RunSecondary, c),
         KeyBinding::new("tab", ToggleActions, c),
@@ -194,7 +196,13 @@ impl Launcher {
     }
 
     fn query_changed(&mut self, cx: &mut Context<Self>) {
+        let was_clipboard = self.in_clipboard();
         self.query = self.field.read(cx).query();
+        log::debug!("query {:?}", self.query);
+        if self.in_clipboard() && !was_clipboard {
+            // Entering the clipboard view: a fresh list and preview.
+            self.clip = clip::ClipView::default();
+        }
         self.panel = None;
         self.confirming = None;
         self.notice = None;
@@ -330,6 +338,18 @@ impl Launcher {
     fn copy_entry(&mut self, _: &query_field::Copy, _: &mut Window, cx: &mut Context<Self>) {
         if self.in_clipboard() {
             self.clip_use(false, cx);
+        }
+    }
+
+    fn preview_down(&mut self, _: &PreviewDown, _: &mut Window, cx: &mut Context<Self>) {
+        if self.in_clipboard() {
+            self.clip_page(true, cx);
+        }
+    }
+
+    fn preview_up(&mut self, _: &PreviewUp, _: &mut Window, cx: &mut Context<Self>) {
+        if self.in_clipboard() {
+            self.clip_page(false, cx);
         }
     }
 

@@ -158,6 +158,8 @@ impl Render for Launcher {
             .on_action(cx.listener(Self::run_secondary))
             .on_action(cx.listener(Self::toggle_actions))
             .on_action(cx.listener(Self::copy_entry))
+            .on_action(cx.listener(Self::preview_down))
+            .on_action(cx.listener(Self::preview_up))
             .on_action(cx.listener(Self::dismiss))
             .on_action(cx.listener(|this, _: &Run1, _, cx| this.run_row(0, cx)))
             .on_action(cx.listener(|this, _: &Run2, _, cx| this.run_row(1, cx)))

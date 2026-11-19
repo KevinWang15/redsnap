@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use gpui::{
     AnyElement, Context, Global, HighlightStyle, InteractiveElement, IntoElement, ObjectFit, ParentElement, RenderImage,
-    SharedString, StatefulInteractiveElement, Styled, StyledImage, StyledText, div, img, prelude::FluentBuilder, px, rgb,
-    rgba,
+    ListAlignment, ListState, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledImage, StyledText,
+    div, img, list, point, prelude::FluentBuilder, px, rgb, rgba,
 };
 use redsnap_core::clipboard::{ClipStore, Content, Entry, Found, History, Kind};
 use redsnap_platform::clipboard::{Target, Watcher};
@@ -33,14 +33,64 @@ pub struct ClipView {
     pub top: usize,
     /// The selected image entry's picture, once loaded: (entry id, image).
     pub image: Option<(String, Arc<RenderImage>)>,
+    /// The preview's scroll position (file lists, skip notes); back to the
+    /// top for each entry.
+    pub scroll: ScrollHandle,
+    /// The text preview: the selected entry's lines, laid out only as they
+    /// scroll into view, so texts of any length preview whole.
+    pub text: Option<TextPreview>,
+}
+
+pub struct TextPreview {
+    pub id: String,
+    pub list: ListState,
+    history: Arc<History>,
+    index: usize,
+    chunks: Arc<Vec<Range<usize>>>,
+    highlights: Arc<Vec<Range<usize>>>,
+}
+
+/// Byte ranges of the lines of `text`, long lines cut into pieces so no
+/// single row is expensive to lay out.
+fn line_chunks(text: &str) -> Vec<Range<usize>> {
+    const PIECE: usize = 2000;
+    let mut out = Vec::new();
+    let mut start = 0;
+    for line in text.split_inclusive('\n') {
+        let content = line.trim_end_matches(['\n', '\r']);
+        let mut from = 0;
+        loop {
+            let mut to = (from + PIECE).min(content.len());
+            while !content.is_char_boundary(to) {
+                to -= 1;
+            }
+            out.push(start + from..start + to);
+            from = to;
+            if from >= content.len() {
+                break;
+            }
+        }
+        start += line.len();
+    }
+    out
 }
 
 const LIMIT: usize = 300;
+
 
 fn white(a: f32) -> gpui::Hsla {
     let mut c: gpui::Hsla = rgb(0xFFFFFF).into();
     c.a = a;
     c
+}
+
+/// The scrollbar thumb's height and top for a viewport `view` tall, content
+/// scrollable by `max`, scrolled `y` down. `None` when nothing scrolls.
+fn scroll_thumb(view: gpui::Pixels, max: gpui::Pixels, y: gpui::Pixels) -> Option<(gpui::Pixels, gpui::Pixels)> {
+    (max > px(0.) && view > px(0.)).then(|| {
+        let h = (view * (view / (view + max))).max(px(24.));
+        (h, (view - h) * (y / max).clamp(0., 1.))
+    })
 }
 
 /// "just now", "5 min ago", "3 h ago", "2 days ago".
@@ -91,6 +141,11 @@ impl Launcher {
         self.clip.selected = keep
             .and_then(|id| found.iter().position(|f| history.entries[f.index].id == id))
             .unwrap_or(0);
+        if self.clip.found.get(self.clip.selected).map(|f| &self.clip.history.entries[f.index].id)
+            != found.get(self.clip.selected).map(|f| &history.entries[f.index].id)
+        {
+            self.clip.scroll.set_offset(point(px(0.), px(0.)));
+        }
         self.clip.history = history;
         self.clip.found = found;
         self.clip_scroll();
@@ -116,7 +171,11 @@ impl Launcher {
         if self.clip.found.is_empty() {
             return;
         }
-        self.clip.selected = to.clamp(0, self.clip.found.len() as isize - 1) as usize;
+        let to = to.clamp(0, self.clip.found.len() as isize - 1) as usize;
+        if to != self.clip.selected {
+            self.clip.scroll.set_offset(point(px(0.), px(0.)));
+        }
+        self.clip.selected = to;
         self.clip_scroll();
         self.load_preview(cx);
         cx.notify();
@@ -129,6 +188,19 @@ impl Launcher {
     /// Loads the selected image entry's picture off the UI thread.
     fn load_preview(&mut self, cx: &mut Context<Self>) {
         let Some(e) = self.selected_entry() else { return };
+        if e.kind == Kind::Text && self.clip.text.as_ref().is_none_or(|t| t.id != e.id) {
+            let found = &self.clip.found[self.clip.selected];
+            let chunks = Arc::new(line_chunks(&e.text));
+            self.clip.text = Some(TextPreview {
+                id: e.id.clone(),
+                list: ListState::new(chunks.len(), ListAlignment::Top, px(300.)),
+                history: self.clip.history.clone(),
+                index: found.index,
+                chunks,
+                highlights: Arc::new(found.highlights.clone()),
+            });
+            return;
+        }
         if e.kind != Kind::Image || self.clip.image.as_ref().is_some_and(|(id, _)| *id == e.id) {
             return;
         }
@@ -154,6 +226,24 @@ impl Launcher {
             }
         })
         .detach();
+    }
+
+    /// Shift+PageDown / Shift+PageUp: scrolls the preview by most of a page.
+    pub(super) fn clip_page(&mut self, down: bool, cx: &mut Context<Self>) {
+        if let Some(t) = &self.clip.text
+            && self.selected_entry().is_some_and(|e| e.id == t.id)
+        {
+            let page = t.list.viewport_bounds().size.height * 0.9;
+            t.list.scroll_by(if down { page } else { -page });
+            cx.notify();
+            return;
+        }
+        let s = &self.clip.scroll;
+        let page = s.bounds().size.height * 0.9;
+        let max = s.max_offset().height;
+        let y = s.offset().y + if down { -page } else { page };
+        s.set_offset(point(px(0.), y.clamp(-max, px(0.))));
+        cx.notify();
     }
 
     /// Enter: puts the entry on the clipboard and pastes it into the app that
@@ -303,6 +393,60 @@ impl Launcher {
             .into_any_element()
     }
 
+    /// The text preview: one row per line (or piece of a long line), laid out
+    /// only when scrolled into view, with a thin scrollbar.
+    fn text_list(&self, t: &TextPreview) -> AnyElement {
+        let (history, index, chunks, highlights) = (t.history.clone(), t.index, t.chunks.clone(), t.highlights.clone());
+        let rows = list(t.list.clone(), move |i, _, _| {
+            let text = &history.entries[index].text;
+            let r = chunks[i].clone();
+            let ranges: Vec<Range<usize>> = highlights
+                .iter()
+                .filter(|h| h.start >= r.start && h.end <= r.end)
+                .map(|h| h.start - r.start..h.end - r.start)
+                .collect();
+            let line = &text[r];
+            div()
+                .w_full()
+                .text_size(px(14.))
+                .line_height(px(20.))
+                .min_h(px(20.))
+                .text_color(white(0.9))
+                .child(highlighted(line.to_string(), ranges))
+                .into_any_element()
+        })
+        .size_full();
+        let (view, max, y) = (
+            t.list.viewport_bounds().size.height,
+            t.list.max_offset_for_scrollbar().height,
+            -t.list.scroll_px_offset_for_scrollbar().y,
+        );
+        // Absolutely positioned, so the list gets a definite height and lays
+        // out only the rows in view (an indefinite height measures them all).
+        div()
+            .relative()
+            .size_full()
+            .child(div().absolute().top_0().left_0().bottom_0().right(px(10.)).child(rows))
+            .when_some(scroll_thumb(view, max, y), |d, (h, top)| {
+                d.child(div().absolute().right(px(0.)).top(top).w(px(4.)).h(h).rounded(px(2.)).bg(white(0.25)))
+            })
+            .into_any_element()
+    }
+
+    /// `content` in a vertical scroll area with a thin scrollbar.
+    fn scrollable(&self, content: AnyElement) -> AnyElement {
+        let s = &self.clip.scroll;
+        let thumb = scroll_thumb(s.bounds().size.height, s.max_offset().height, -s.offset().y);
+        div()
+            .relative()
+            .size_full()
+            .child(div().id("clip-preview").size_full().overflow_y_scroll().track_scroll(s).pr(px(10.)).child(content))
+            .when_some(thumb, |d, (h, top)| {
+                d.child(div().absolute().right(px(0.)).top(top).w(px(4.)).h(h).rounded(px(2.)).bg(white(0.25)))
+            })
+            .into_any_element()
+    }
+
     fn clip_preview(&self) -> AnyElement {
         let pane = div()
             .flex_1()
@@ -338,18 +482,13 @@ impl Launcher {
                     e.text
                 )))
                 .into_any_element(),
-            Kind::Text => {
-                // Long texts: the first 4,000 characters; the entry itself is complete.
-                let end = e.text.char_indices().nth(4000).map_or(e.text.len(), |(i, _)| i);
-                let ranges: Vec<Range<usize>> = found.highlights.iter().filter(|r| r.end <= end).cloned().collect();
-                div()
-                    .text_size(px(14.))
-                    .line_height(px(20.))
-                    .text_color(white(0.9))
-                    .child(highlighted(e.text[..end].to_string(), ranges))
-                    .into_any_element()
-            }
+            Kind::Text => match &self.clip.text {
+                Some(t) if t.id == e.id => self.text_list(t),
+                _ => div().into_any_element(),
+            },
         };
+        // File lists and skip notes scroll here; text scrolls in its own list.
+        let body = if matches!(e.kind, Kind::Files | Kind::Skipped) { self.scrollable(body) } else { body };
         let info = match e.kind {
             Kind::Image => e.image_size.map(|(w, h)| format!("{w} × {h} · {}", redsnap_core::clipboard::human_bytes(e.size_bytes))),
             Kind::Text => Some(format!("{} characters", e.text.chars().count())),
@@ -359,8 +498,25 @@ impl Launcher {
         pane.flex()
             .flex_col()
             .gap(px(8.))
-            .child(div().flex_1().min_h_0().overflow_hidden().child(body))
+            .child(div().relative().flex_1().min_h_0().overflow_hidden().child(body))
             .when_some(info, |d, info| d.child(div().text_size(px(12.)).text_color(white(0.45)).child(info)))
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lines_and_long_lines_become_rows() {
+        let t = "one\r\ntwo\n\nthree";
+        let rows: Vec<&str> = line_chunks(t).into_iter().map(|r| &t[r]).collect();
+        assert_eq!(rows, ["one", "two", "", "three"]);
+        let long = "é".repeat(1500); // 3000 bytes
+        let rows = line_chunks(&long);
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|r| long.is_char_boundary(r.start) && long.is_char_boundary(r.end)));
+        assert_eq!(rows.last().unwrap().end, long.len());
     }
 }
