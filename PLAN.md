@@ -88,8 +88,11 @@ where phase 1 must leave room for them.
 - The shortcut toggles: pressing it while the window is shown hides it.
 - Opens on the monitor under the mouse cursor, centered horizontally, about a
   quarter of the way down the work area.
-- Fixed size: query field plus 8 result rows. With an empty query, the rows show
-  the most used items, so the window never needs to resize.
+- Look: a dark translucent glass panel with a red accent, specified in
+  [docs/design.md](docs/design.md).
+- Fixed size (760 × 474): query field, 5 result rows and a footer with the result
+  count and key hints. More results scroll. With an empty query, the rows show the
+  most used items, so the window never needs to resize.
 - Hides when it loses focus, on Esc, after running an action, and when the
   session locks.
 - Query field with full caret and selection editing, mouse included, clipboard
@@ -99,7 +102,7 @@ where phase 1 must leave room for them.
 - **Enter** runs the primary action. **Cmd/Ctrl+Enter** runs the secondary action
   (for apps: show in Finder/Explorer/file manager). **Tab** or **Cmd/Ctrl+K** opens
   the action panel for the selected row; the actions are computed only when it opens.
-- Light and dark themes following the OS, or forced in settings.
+- Phase 1 ships the dark glass design only; a light variant comes later.
 
 ### 3.2 Providers
 
@@ -381,9 +384,19 @@ frame). That is far too slow for every hotkey press. So:
 - Don't free caches or trim memory when hiding. Pruning on hide caused visible
   stalls on the next show. Bound the caches instead (§5.6).
 - Window style:
-  - Windows: `WS_POPUP`, `WS_EX_TOOLWINDOW` (no taskbar button), DWM rounded
-    corners, dark mode attribute, no backdrop (a backdrop flashes gray).
+  - Windows: `WS_POPUP`, `WS_EX_TOOLWINDOW` (no taskbar button), dark mode
+    attribute.
   - macOS: borderless, Accessory activation policy, `LSUIElement`.
+- Glass (docs/design.md): the window is transparent and the panel is drawn by
+  gpui. The blur comes from the OS:
+  - macOS: gpui `Blurred` (native window blur).
+  - Windows 11: acrylic behind the window. gpui's `Blurred` fills the whole window
+    rectangle, so it must be clipped to the 20 px rounded panel. Options are DWM
+    rounded corners (only 8 px), a window region (aliased edge) or a
+    DirectComposition clip; the spike picks one. Showing the window cloaked must
+    not flash an unblurred or gray backdrop.
+  - Windows 10 and Linux without a blurring compositor: no blur, and a more opaque
+    fill.
 - **Spike first (M0)**: gpui 0.2.2 has no public hide/show for a window (hiding
   the raw handle with `ShowWindow(SW_HIDE/SW_SHOW)` from outside gpui is known to
   work on Windows). Confirm
@@ -723,8 +736,9 @@ A spike is a short experiment with throwaway code that answers one question.
 **M0 latency spike, concretely:**
 
 - A minimal app: vendored gpui 0.2.2 with patches 1–5 (§6.1), one pre-created
-  hidden search window, a global hotkey, a query field, and 8 result rows with
-  icons filtered from a fixture list of 2,000 names.
+  hidden search window drawn to docs/design.md (glass included), a global
+  hotkey, a query field, and 5 result rows with icons filtered from a fixture list
+  of 2,000 names.
 - Timeline logging to `perf.jsonl`: hotkey received, show requested, first frame
   presented, window visible; keystroke received, results computed, frame
   presented.
@@ -732,6 +746,9 @@ A spike is a short experiment with throwaway code that answers one question.
   p50/p95/max. The driver sends input only to the spike's own window.
 - Run on the real Windows host first (cross-built from WSL), then Linux/X11 here,
   then macOS on a GitHub runner or a Mac.
+- Compare two paint modes: stock gpui, which paints on the next refresh tick of
+  its vsync thread (up to 16.7 ms after input), and paint right after input
+  (`RedrawWindow(RDW_UPDATENOW)` from a spawned task).
 - Pass: hotkey → painted window ≤ 16.7 ms p95 and keystroke → results frame
   ≤ 10 ms p95 on Windows.
 
