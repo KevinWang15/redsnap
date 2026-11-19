@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["spikes/latency"]
+members = ["crates/core", "spikes/latency"]
 
 [workspace.package]
 version = "0.0.0"
@@ -17,3 +17,10 @@ gpui = { path = "third_party/gpui" }
 # gpui 0.2.2 pulls in xattr 0.2.3, which no longer builds on Linux against
 # current libc (ENOATTR was removed there).
 xattr = { path = "third_party/xattr" }
+
+[workspace.dependencies]
+redsnap-core = { path = "crates/core" }
+anyhow = "1"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
