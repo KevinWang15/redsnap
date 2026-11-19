@@ -11,9 +11,14 @@ about 1.25× scale, so measurements from it are divided by 1.25.
 - Fill: a vertical gradient from `rgba(16, 24, 30, 0.80)` at the top to
   `rgba(22, 18, 34, 0.84)` at the bottom (slightly teal → slightly violet).
 - The OS blurs are not used. Windows acrylic blurs too strongly to show anything
-  and can't be tuned. Instead, RedSnap captures the screen under the hidden
-  window just before showing it and blurs that itself (quarter resolution, three
-  box passes). The window is fully transparent outside the panel, so the panel's
+  and can't be tuned. Instead, RedSnap captures the screen under its window and
+  blurs that itself (quarter resolution, three box passes).
+- The capture takes 9–13 ms on Windows (GDI waits for composition), too long to
+  wait for. The window shows at once with an opaque fill while it is excluded
+  from captures (`WDA_EXCLUDEFROMCAPTURE`). The capture runs in the background,
+  and when the blurred picture arrives (about a frame later) the fill fades to
+  0.8 over 100 ms. The exclusion is lifted after the capture, so screenshots of
+  RedSnap still work. The window is fully transparent outside the panel, so the panel's
   own 20 px corners are the window's corners.
 - Border: 1 px `rgba(255, 255, 255, 0.10)`. Corner radius 20.
 - A soft drop shadow outside the panel, if the OS draws one for the window.

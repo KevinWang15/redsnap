@@ -47,7 +47,8 @@ mod windows {
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetCursorPos, GetWindowRect, HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOSIZE,
-        SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, WM_PAINT,
+        SendMessageW, SetForegroundWindow, SetWindowDisplayAffinity, SetWindowPos, ShowWindow, WDA_EXCLUDEFROMCAPTURE,
+        WDA_NONE, WM_PAINT,
     };
 
     fn hwnd(n: Native) -> HWND {
@@ -157,8 +158,18 @@ mod windows {
 
     pub const CAN_PAINT_NOW: bool = true;
 
-    /// The screen pixels under the window (which must be hidden or cloaked,
-    /// so it isn't in the picture), as tightly packed BGRA rows.
+    /// While excluded, the window doesn't appear in any screen capture (GDI,
+    /// DXGI, Windows Graphics Capture), so the matte backdrop can be captured
+    /// with the window already on screen. It's switched off again once the
+    /// backdrop is read, so screenshots of RedSnap work. Windows 10 2004+;
+    /// older versions ignore it. Call from the window's thread.
+    pub fn set_capture_excluded(n: Native, excluded: bool) {
+        let affinity = if excluded { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
+        unsafe { SetWindowDisplayAffinity(hwnd(n), affinity) };
+    }
+
+    /// The screen pixels under the window, as tightly packed BGRA rows. Call
+    /// while the window is hidden or excluded from captures. Any thread.
     pub fn capture_behind(n: Native) -> Option<(usize, usize, Vec<u8>)> {
         use windows_sys::Win32::Graphics::Gdi::{
             BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS,
@@ -285,6 +296,8 @@ mod linux {
         None
     }
 
+    pub fn set_capture_excluded(_: Native, _: bool) {}
+
     pub fn physical_size(_: Native) -> (usize, usize) {
         (760, 474)
     }
@@ -321,6 +334,8 @@ mod macos {
     pub fn capture_behind(_: Native) -> Option<(usize, usize, Vec<u8>)> {
         None
     }
+
+    pub fn set_capture_excluded(_: Native, _: bool) {}
 
     pub fn physical_size(_: Native) -> (usize, usize) {
         (760, 474)

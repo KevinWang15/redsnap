@@ -82,6 +82,10 @@ pub struct Launcher {
     /// The last backdrop, taken off screen on hide; its texture is freed on
     /// the next show (that needs the window).
     stale_backdrop: Option<Arc<RenderImage>>,
+    /// Counts shows, so a backdrop that arrives after its show ended is dropped.
+    show_count: u64,
+    /// When the backdrop arrived: the fill fades from opaque to `alpha`.
+    fade_from: Option<Instant>,
     _subs: Vec<gpui::Subscription>,
 }
 
@@ -107,6 +111,8 @@ impl Launcher {
             opts,
             backdrop: None,
             stale_backdrop: None,
+            show_count: 0,
+            fade_from: None,
             _subs: subs,
         };
         this.hits = this.catalog.search("", LIMIT);
@@ -135,8 +141,14 @@ impl Launcher {
         }
     }
 
-    /// Fresh state for a new show: empty query, the default list.
+    /// Fresh state for a new show: empty query, the default list, no
+    /// backdrop yet (opaque fill).
     fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_count += 1;
+        self.fade_from = None;
+        if let Some(old) = self.backdrop.take() {
+            self.stale_backdrop.get_or_insert(old);
+        }
         self.field.update(cx, |f, cx| f.clear(cx));
         self.hits = self.catalog.search("", LIMIT);
         self.selected = 0;
@@ -148,10 +160,27 @@ impl Launcher {
 
     /// Replaces the matte backdrop, freeing the old one's GPU texture.
     fn set_backdrop(&mut self, image: Option<Arc<RenderImage>>, window: &mut Window, cx: &mut Context<Self>) {
+        self.fade_from = image.as_ref().map(|_| Instant::now());
         for old in [std::mem::replace(&mut self.backdrop, image), self.stale_backdrop.take()].into_iter().flatten() {
             window.drop_image(old).ok();
         }
         cx.notify();
+    }
+
+    /// The fill's opacity now: opaque until the backdrop is there, then a
+    /// 100 ms fade to `alpha` (asks for frames while it runs).
+    fn fill_alpha(&self, window: &mut Window) -> f32 {
+        if !self.opts.matte {
+            return self.opts.alpha;
+        }
+        let Some(from) = self.fade_from else { return 1.0 };
+        let t = (from.elapsed().as_secs_f32() / FADE_SECS).min(1.0);
+        if t < 1.0 {
+            window.request_animation_frame();
+        }
+        // Ease out.
+        let e = 1.0 - (1.0 - t) * (1.0 - t);
+        1.0 + (self.opts.alpha - 1.0) * e
     }
 
     pub fn hide(&mut self, cx: &mut Context<Self>) {
@@ -221,9 +250,9 @@ pub async fn show(handle: WindowHandle<Launcher>, this: WeakEntity<Launcher>, st
     let prepared = handle.update(cx, |launcher, window, cx| {
         launcher.reset(window, cx);
         launcher.visible = true;
-        (launcher.native, launcher.opts)
+        (launcher.native, launcher.opts, launcher.show_count)
     });
-    let Ok((native, opts)) = prepared else { return };
+    let Ok((native, opts, show)) = prepared else { return };
     let _ = this;
 
     if cfg!(target_os = "macos") {
@@ -236,19 +265,7 @@ pub async fn show(handle: WindowHandle<Launcher>, this: WeakEntity<Launcher>, st
     let Some(n) = native else { return };
     os::place(n, os::placement_at_cursor(n, (WIDTH, HEIGHT)));
     if opts.matte {
-        let t = Instant::now();
-        // The window is hidden (or cloaked) here, so it isn't in the capture.
-        let shot = if opts.bench {
-            let (w, h) = os::physical_size(n);
-            Some((w, h, backdrop::synthetic(w, h)))
-        } else {
-            os::capture_behind(n)
-        };
-        let captured = t.elapsed().as_secs_f64() * 1000.0;
-        let image = shot.map(|(w, h, bgra)| backdrop::blur(w, h, &bgra, opts.blur));
-        perf::record("backdrop_capture", captured);
-        perf::record("backdrop_capture_blur", t.elapsed().as_secs_f64() * 1000.0);
-        handle.update(cx, |launcher, window, cx| launcher.set_backdrop(image, window, cx)).ok();
+        os::set_capture_excluded(n, true);
     }
     if opts.cloaked {
         os::set_cloaked(n, true);
@@ -265,6 +282,9 @@ pub async fn show(handle: WindowHandle<Launcher>, this: WeakEntity<Launcher>, st
         os::show(n);
     }
     perf::record("show_calls", started.elapsed().as_secs_f64() * 1000.0);
+    if opts.matte {
+        load_backdrop(handle, n, opts, show, started, cx);
+    }
     // No `window.activate_window()` on Windows: gpui's version replays its
     // creation bounds and injects a fake Alt keypress (SendInput) to get the
     // foreground. The process that received the hotkey may take it directly.
@@ -276,6 +296,42 @@ pub async fn show(handle: WindowHandle<Launcher>, this: WeakEntity<Launcher>, st
     }
 }
 
+/// Captures and blurs the screen under the window on a background thread,
+/// after the window is already up (it is excluded from captures), then hands
+/// the picture to the launcher, which fades its fill down to show it.
+fn load_backdrop(handle: WindowHandle<Launcher>, n: Native, opts: Options, show: u64, started: Instant, cx: &mut AsyncApp) {
+    let work = cx.background_executor().spawn(async move {
+        let t = Instant::now();
+        // Bench runs never read the real screen.
+        let shot = if opts.bench {
+            let (w, h) = os::physical_size(n);
+            Some((w, h, backdrop::synthetic(w, h)))
+        } else {
+            os::capture_behind(n)
+        };
+        let captured = t.elapsed().as_secs_f64() * 1000.0;
+        let image = shot.map(|(w, h, bgra)| backdrop::blur(w, h, &bgra, opts.blur));
+        (image, captured, t.elapsed().as_secs_f64() * 1000.0)
+    });
+    cx.spawn(async move |cx| {
+        let (image, captured, total) = work.await;
+        // Read; screenshots may see RedSnap again.
+        os::set_capture_excluded(n, false);
+        perf::record("backdrop_capture", captured);
+        perf::record("backdrop_capture_blur", total);
+        handle
+            .update(cx, |launcher, window, cx| {
+                // Still the same show?
+                if launcher.visible && launcher.show_count == show {
+                    launcher.set_backdrop(image, window, cx);
+                    perf::record("show_to_backdrop", started.elapsed().as_secs_f64() * 1000.0);
+                }
+            })
+            .ok();
+    })
+    .detach();
+}
+
 // ----- drawing ---------------------------------------------------------------
 
 fn white(alpha: f32) -> Hsla {
@@ -285,13 +341,15 @@ fn white(alpha: f32) -> Hsla {
 }
 
 const RED: u32 = 0xE8344E;
+const FADE_SECS: f32 = 0.1;
 
 fn with_alpha(rgb: u32, alpha: f32) -> gpui::Rgba {
     rgba((rgb << 8) | (alpha.clamp(0., 1.) * 255.).round() as u32)
 }
 
 impl Render for Launcher {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let alpha = self.fill_alpha(window);
         let has_query = !self.field.read(cx).is_empty();
         let count = self.hits.len();
         let rows: Vec<AnyElement> = (self.top..(self.top + ROWS).min(count))
@@ -393,8 +451,8 @@ impl Render for Launcher {
             })
             .child(layer().bg(linear_gradient(
                 180.,
-                linear_color_stop(with_alpha(0x10181E, self.opts.alpha), 0.),
-                linear_color_stop(with_alpha(0x161222, (self.opts.alpha + 0.04).min(1.)), 1.),
+                linear_color_stop(with_alpha(0x10181E, alpha), 0.),
+                linear_color_stop(with_alpha(0x161222, (alpha + 0.04).min(1.)), 1.),
             )))
             .child(content)
             // The border goes on top of everything.
