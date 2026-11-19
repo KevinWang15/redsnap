@@ -1,9 +1,9 @@
 //! RedSnap Settings in the system webview (WebView2 on Windows, WKWebView on
-//! macOS, WebKitGTK on Linux): the same React UI as the Electron app,
+//! macOS, WebKitGTK on Linux): the React + Tailwind UI in settings-ui/,
 //! without shipping a browser.
 //!
 //! RedSnap starts this with its private channel in the environment
-//! (`REDSNAP_IPC_PATH`, `REDSNAP_IPC_TOKEN`), exactly like the Electron app.
+//! (`REDSNAP_IPC_PATH`, `REDSNAP_IPC_TOKEN`).
 //! The page gets `window.redsnap` (`call`, `onEvent`, `platform`) from an
 //! initialization script; calls go through `window.ipc.postMessage` to this
 //! process, which checks them against an allow-list and forwards them to
@@ -25,7 +25,7 @@ use tao::window::WindowBuilder;
 use wry::http::{Response, header::CONTENT_TYPE};
 use wry::{PageLoadEvent, WebViewBuilder};
 
-/// The requests the page may make (as in electron/main/main.cjs).
+/// The requests the page may make; anything else is refused here.
 const ALLOWED: &[&str] = &[
     "config.get",
     "config.save",
@@ -61,7 +61,7 @@ enum Ui {
 }
 
 fn platform() -> &'static str {
-    // The names the UI already expects (Electron's `process.platform`).
+    // Node's `process.platform` names, which the UI uses.
     if cfg!(windows) {
         "win32"
     } else if cfg!(target_os = "macos") {
@@ -303,7 +303,7 @@ fn run() -> Result<()> {
                 window.set_visible(true);
                 window.set_focus();
                 // For RedSnap's log: requested → shown.
-                let _ = channel.send("settings.shown", json!({ "backend": "webview" }), None);
+                let _ = channel.send("settings.shown", json!({}), None);
             }
             Event::UserEvent(Ui::Loaded) => {}
             Event::UserEvent(Ui::FromRedSnap(msg)) => {

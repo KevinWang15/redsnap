@@ -35,7 +35,13 @@ This document has these parts:
     Rust behind the `Platform` trait.
 - **Hosting and CI: GitHub**, with GitHub Actions on `ubuntu-latest`,
   `windows-latest` and `macos-latest`. Releases come from `vX.Y.Z` tags.
-- **Everything other than the search window is Electron**, started on demand.
+- **Everything other than the search window is a web UI** (React + Tailwind,
+  `settings-ui/`), started on demand. Since 2026-11-19 it runs in the **system
+  webview** (`crates/settings-host`, wry: WebView2 / WKWebView / WebKitGTK)
+  instead of Electron: 2 MB installed instead of 310 MB, for about 0.1 s more
+  when opening (measured on Windows: 300–350 ms against about 200 ms). Where
+  this plan still says "Electron", read "the settings app"; the architecture
+  (private channel, native owns config) is unchanged.
 
 ---
 
@@ -140,7 +146,7 @@ characters: `wx` and `weixin` both find 微信.
   tray and opens Settings on the Shortcut field with the error shown.
 - Crash details appended to `crash.log`; a rotating `redsnap.log`.
 
-### 3.5 Settings (Electron)
+### 3.5 Settings (web UI in the system webview)
 
 - **General**: shortcut recorder, start at login, theme, number of rows.
 - **Search**: enable or disable each provider; web searches and quick links
@@ -303,7 +309,7 @@ All actions are typed. URLs are restricted to http(s) and a short list of OS
 settings schemes at the point where they are executed. Nothing builds a shell
 command line from strings.
 
-### 4.5 Native ↔ Electron
+### 4.5 Native ↔ settings app
 
 - **Transport**: the same local endpoint the single instance uses.
   - Windows: named pipe `\\.\pipe\redsnap-<user SID>`.
@@ -649,26 +655,22 @@ keystroke. The risk is gpui's frame cost, which M0 measures against them.
 - Strict decoding: `deny_unknown_fields` everywhere. JSON with duplicate keys is
   rejected (serde normally takes the last one silently).
 
-### 5.14 Electron details
+### 5.14 Settings app details
 
-- Window: `show: false` with `backgroundColor` matching the theme, shown on
-  `ready-to-show`. That removes the white flash.
-- `app.requestSingleInstanceLock()`. The `second-instance` handler focuses the
-  window and reads the requested page.
-- `app.setAppUserModelId(<bundle id>)` on Windows so the taskbar uses the RedSnap
-  icon.
-- Hardening:
-  - `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`.
-  - The preload exposes only the typed API (`config.get`, `config.save`, …).
-  - The renderer loads only bundled files; navigation and `window.open` are denied.
-- Package with `@electron/packager` (asar, prune, keep only `en-US` and `zh-CN`
-  locales, about 45 MB smaller). The packaged app is placed beside the native
-  binary:
-  - Windows / Linux: `settings/`
-  - macOS: `Contents/Resources/settings/RedSnap Settings.app`, signed as a nested
-    bundle.
-- Native and Electron versions are the same number. A tag release checks
-  `Cargo.toml` and `package.json` agree.
+- `crates/settings-host` (`redsnap-settings`) shows `settings-ui/dist` in the
+  system webview. The UI is served through a private scheme
+  (`http://redsnap.localhost` on Windows, `redsnap://localhost` elsewhere);
+  navigation elsewhere and new windows are refused.
+- The page gets `window.redsnap` (`call`, `onEvent`, `platform`) from an
+  initialization script; calls go through `window.ipc.postMessage`, are
+  checked against an allow-list in Rust, and are forwarded on RedSnap's
+  private channel.
+- The window stays hidden until the page has loaded, on the app's own
+  background color, so it never flashes white.
+- The webview's own data goes under RedSnap's data folder
+  (`REDSNAP_SETTINGS_DATA`), never next to the executable.
+- Windows needs the WebView2 runtime (part of Windows 11 and current
+  Windows 10); Linux needs WebKitGTK 4.1.
 
 ### 5.15 Shutdown and test switches
 

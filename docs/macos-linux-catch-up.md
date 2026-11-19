@@ -31,7 +31,8 @@ Read first: `PLAN.md` (architecture, §5 implementation rules), `docs/design.md`
 | `crates/core` | Search engine, ranking, calculator, config, usage store, clipboard store and search. No OS code; fully tested anywhere. |
 | `crates/platform` | Every OS call: `window.rs` (show/hide/place/capture), `apps/` (discovery + icons per OS), `clipboard/` (capture/write/paste), `autostart.rs`, `instance.rs` (single instance), `settings_ipc.rs`, `open.rs` (launch, open, system commands), `tray.rs`. |
 | `crates/app` | The `redsnap` binary: gpui search window (`launcher/`), event loop (`app.rs`), shortcuts (`hotkeys.rs`), settings host (`settings.rs`), icons. |
-| `electron/` | Settings app: Vite + React + TypeScript + Tailwind. |
+| `settings-ui/` | Settings UI: Vite + React + TypeScript + Tailwind. |
+| `crates/settings-host` | `redsnap-settings`: shows settings-ui in the system webview (wry: WebView2 / WKWebView / WebKitGTK). |
 | `third_party/gpui` | Vendored gpui 0.2.2 with patches listed in `PATCHES.md`. |
 
 ## Build and run
@@ -52,20 +53,16 @@ Logs: `<profile>/data/logs/redsnap.log` (`RUST_LOG=redsnap=debug` for more).
 Settings app in development:
 
 ```sh
-cd electron && npm ci && npm run build
-# npm sometimes skips Electron's download step; if node_modules/electron/dist is missing:
-node node_modules/electron/install.js
-# Then start RedSnap with:
-REDSNAP_SETTINGS_BIN="$PWD/node_modules/electron/dist/electron" \
-REDSNAP_SETTINGS_ARGS="$PWD" \
-  ../target/debug/redsnap --profile=/tmp/rs1
-# macOS: REDSNAP_SETTINGS_BIN=$PWD/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron
-# Linux as root: REDSNAP_SETTINGS_ARGS="--no-sandbox|$PWD"   (| separates arguments)
+(cd settings-ui && npm ci && npm run build)
+cargo build -p redsnap-settings
+REDSNAP_SETTINGS_BIN="$PWD/target/debug/redsnap-settings" \
+REDSNAP_SETTINGS_WEB="$PWD/settings-ui/dist" \
+  target/debug/redsnap --profile=/tmp/rs1
 ```
 
 Linux build dependencies (Debian/Ubuntu): `libxkbcommon-x11-dev libwayland-dev
 libvulkan-dev libfontconfig-dev libfreetype-dev libxcb1-dev libx11-xcb-dev
-libssl-dev`, plus a Vulkan driver (Mesa; software `lavapipe` works for testing).
+libssl-dev libwebkit2gtk-4.1-dev libgtk-3-dev`, plus a Vulkan driver (Mesa; software `lavapipe` works for testing).
 macOS: Xcode (gpui compiles Metal shaders; `xcodebuild -downloadComponent
 MetalToolchain` if `xcrun metal` is missing).
 
@@ -104,7 +101,7 @@ MetalToolchain` if `xcrun metal` is missing).
 | Paste into previous app | done | **not implemented** | **not implemented** |
 | Start at login | done | LaunchAgent plist; untested | `~/.config/autostart`; untested |
 | Single instance / CLI | done | Unix socket; tested in CI | tested |
-| Settings app | done | locates `../Resources/settings/RedSnap Settings.app`; untested | locates `settings/redsnap-settings`; tested in dev mode |
+| Settings app (system webview) | done (WebView2) | `../Resources/settings/redsnap-settings` (WKWebView); untested | WebKitGTK; tested in dev mode |
 | Snippets: insert from the launcher | done | **not implemented** | **not implemented** |
 | Snippets: expand as you type | done (keyboard hook) | **not implemented** | **not implemented** |
 | Latency measured | yes (PLAN.md §7) | **no** (CI bench stalled after ~3 shows) | Xvfb only |
@@ -244,5 +241,5 @@ MetalToolchain` if `xcrun metal` is missing).
   as far as the compositor allows), with the gaps that the OS imposes shown
   to the user, not silently missing.
 - Latency on each is measured with `--perf` and recorded in `PLAN.md` §7.
-- `cargo test --workspace`, clippy and the Electron lint/build pass; Windows
+- `cargo test --workspace`, clippy and the settings-ui lint/build pass; Windows
   still builds.

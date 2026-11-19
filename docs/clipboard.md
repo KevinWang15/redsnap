@@ -94,4 +94,4 @@ The clipboard view is part of the native search window, because searching it
 needs the same instant response: `cb` + space, or its own shortcut
 (Ctrl+Alt+C on Windows and Linux, Option+Cmd+C on macOS, as in Alfred), switches the window to a list on the left and a
 preview on the right. Clipboard settings (retention, excluded apps, skipped
-entries shown or hidden) are in the Electron settings app.
+entries shown or hidden) are in the settings app.

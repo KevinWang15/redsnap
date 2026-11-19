@@ -2,14 +2,14 @@
 //!
 //! Each settings session gets its own endpoint with a random name (a named
 //! pipe on Windows, a socket in the 0700 data folder elsewhere) and a random
-//! token. Both reach Electron through its environment, never its command
-//! line. The first line Electron sends must be `hello` with the token;
+//! token. Both reach the settings app through its environment, never its
+//! command line. The first line it sends must be `hello` with the token;
 //! anything else closes the connection.
 //!
 //! Framing: one JSON object per line, at most 1 MiB.
 //! - request  `{"id": 7, "method": "config.save", "params": {...}}`
 //! - response `{"id": 7, "result": {...}}` or `{"id": 7, "error": "..."}`
-//! - event    `{"event": "config.changed", "params": {...}}` (RedSnap → Electron)
+//! - event    `{"event": "config.changed", "params": {...}}` (RedSnap → settings)
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
@@ -49,7 +49,7 @@ pub type Reply = Box<dyn FnOnce(Result<Value, String>) + Send>;
 /// Called on the IPC thread for each request after `hello`.
 pub type OnRequest = Box<dyn Fn(String, Value, Reply) + Send + Sync>;
 
-/// A settings session: where Electron should connect, with what token.
+/// A settings session: where the settings app should connect, with what token.
 pub struct Session {
     /// For `REDSNAP_IPC_PATH`: a pipe path on Windows, a socket path elsewhere.
     pub path: String,

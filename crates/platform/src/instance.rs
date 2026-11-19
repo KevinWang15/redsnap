@@ -7,8 +7,8 @@
 //!   the foreground on Windows before asking it to show itself)
 //! - `{"method":"cli","params":{"command":"toggle"}}` → `{"ok":true}`
 //!
-//! Lines over 64 KiB close the connection. The Electron settings app will use
-//! the same endpoint with a token (M4).
+//! Lines over 64 KiB close the connection. The settings app gets its own
+//! private endpoint (see `settings_ipc`).
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;

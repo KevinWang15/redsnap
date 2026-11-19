@@ -1,6 +1,6 @@
 [package]
 name = "redsnap-settings"
-description = "RedSnap Settings in the system webview: the same React UI as the Electron app, without a bundled browser"
+description = "RedSnap Settings: the React UI in settings-ui/, shown in the system webview"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
