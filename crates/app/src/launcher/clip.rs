@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use gpui::{
     AnyElement, Context, Global, HighlightStyle, InteractiveElement, IntoElement, ObjectFit, ParentElement, RenderImage,
-    ListAlignment, ListState, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledImage, StyledText,
+    ListAlignment, ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledImage, StyledText,
     div, img, list, point, prelude::FluentBuilder, px, rgb, rgba,
 };
 use redsnap_core::clipboard::{ClipStore, Content, Entry, Found, History, Kind};
@@ -39,6 +39,63 @@ pub struct ClipView {
     /// The text preview: the selected entry's lines, laid out only as they
     /// scroll into view, so texts of any length preview whole.
     pub text: Option<TextPreview>,
+    /// The scrollbar thumb being dragged.
+    drag: Option<Drag>,
+}
+
+/// The text preview's line height.
+const ROW: Pixels = px(20.);
+
+/// Either kind of preview scroll area, behind one scrollbar.
+#[derive(Clone)]
+enum Scroller {
+    List(ListState),
+    Handle(ScrollHandle),
+}
+
+impl Scroller {
+    /// The viewport (window coordinates), how far it can scroll, and how
+    /// far it is scrolled (both positive, in pixels).
+    ///
+    /// The text list only knows the heights of rows it has laid out, so it is
+    /// measured in rows instead: every row counts as one line tall
+    /// (`ROW`), and position is the top row. Wrapped lines make that an
+    /// estimate, but it is right at both ends and moves steadily.
+    fn metrics(&self) -> (gpui::Bounds<Pixels>, Pixels, Pixels) {
+        match self {
+            Scroller::List(l) => {
+                let view = l.viewport_bounds();
+                let total = ROW * l.item_count() as f32;
+                let top = l.logical_scroll_top();
+                let y = ROW * top.item_ix as f32 + top.offset_in_item.min(ROW);
+                let max = (total - view.size.height).max(px(0.));
+                (view, max, y.min(max))
+            }
+            Scroller::Handle(h) => (h.bounds(), h.max_offset().height, -h.offset().y),
+        }
+    }
+
+    fn scroll_to(&self, y: Pixels) {
+        let (_, max, _) = self.metrics();
+        let y = y.clamp(px(0.), max);
+        match self {
+            Scroller::List(l) => {
+                let item_ix = (y / ROW).floor() as usize;
+                l.scroll_to(gpui::ListOffset { item_ix, offset_in_item: y - ROW * item_ix as f32 });
+            }
+            Scroller::Handle(h) => h.set_offset(point(px(0.), -y)),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct Drag {
+    scroller: Scroller,
+    /// Mouse y and scroll position when the thumb was grabbed.
+    grab_y: Pixels,
+    start: Pixels,
+    /// Scroll pixels per pixel of thumb movement.
+    ratio: f32,
 }
 
 pub struct TextPreview {
@@ -228,6 +285,18 @@ impl Launcher {
         .detach();
     }
 
+    /// Whether the preview's size is still unknown: scroll areas learn it
+    /// while being laid out, so the scrollbar can only be drawn one frame
+    /// later.
+    pub(super) fn preview_unmeasured(&self) -> bool {
+        let Some(e) = self.selected_entry() else { return false };
+        match e.kind {
+            Kind::Text => self.clip.text.as_ref().is_some_and(|t| t.list.viewport_bounds().size.height == px(0.)),
+            Kind::Files | Kind::Skipped => self.clip.scroll.bounds().size.height == px(0.),
+            Kind::Image => false,
+        }
+    }
+
     /// Shift+PageDown / Shift+PageUp: scrolls the preview by most of a page.
     pub(super) fn clip_page(&mut self, down: bool, cx: &mut Context<Self>) {
         if let Some(t) = &self.clip.text
@@ -310,7 +379,7 @@ impl Launcher {
                         )
                     }),
             )
-            .child(self.clip_preview())
+            .child(self.clip_preview(cx))
             .into_any_element()
     }
 
@@ -395,7 +464,7 @@ impl Launcher {
 
     /// The text preview: one row per line (or piece of a long line), laid out
     /// only when scrolled into view, with a thin scrollbar.
-    fn text_list(&self, t: &TextPreview) -> AnyElement {
+    fn text_list(&self, t: &TextPreview, cx: &mut Context<Self>) -> AnyElement {
         let (history, index, chunks, highlights) = (t.history.clone(), t.index, t.chunks.clone(), t.highlights.clone());
         let rows = list(t.list.clone(), move |i, _, _| {
             let text = &history.entries[index].text;
@@ -409,45 +478,99 @@ impl Launcher {
             div()
                 .w_full()
                 .text_size(px(14.))
-                .line_height(px(20.))
-                .min_h(px(20.))
+                .line_height(ROW)
+                .min_h(ROW)
                 .text_color(white(0.9))
                 .child(highlighted(line.to_string(), ranges))
                 .into_any_element()
         })
         .size_full();
-        let (view, max, y) = (
-            t.list.viewport_bounds().size.height,
-            t.list.max_offset_for_scrollbar().height,
-            -t.list.scroll_px_offset_for_scrollbar().y,
-        );
         // Absolutely positioned, so the list gets a definite height and lays
         // out only the rows in view (an indefinite height measures them all).
         div()
             .relative()
             .size_full()
-            .child(div().absolute().top_0().left_0().bottom_0().right(px(10.)).child(rows))
-            .when_some(scroll_thumb(view, max, y), |d, (h, top)| {
-                d.child(div().absolute().right(px(0.)).top(top).w(px(4.)).h(h).rounded(px(2.)).bg(white(0.25)))
-            })
+            .child(div().absolute().top_0().left_0().bottom_0().right(px(14.)).child(rows))
+            .child(self.scrollbar(Scroller::List(t.list.clone()), cx))
             .into_any_element()
     }
 
-    /// `content` in a vertical scroll area with a thin scrollbar.
-    fn scrollable(&self, content: AnyElement) -> AnyElement {
+    /// `content` in a vertical scroll area with a scrollbar.
+    fn scrollable(&self, content: AnyElement, cx: &mut Context<Self>) -> AnyElement {
         let s = &self.clip.scroll;
-        let thumb = scroll_thumb(s.bounds().size.height, s.max_offset().height, -s.offset().y);
         div()
             .relative()
             .size_full()
-            .child(div().id("clip-preview").size_full().overflow_y_scroll().track_scroll(s).pr(px(10.)).child(content))
-            .when_some(thumb, |d, (h, top)| {
-                d.child(div().absolute().right(px(0.)).top(top).w(px(4.)).h(h).rounded(px(2.)).bg(white(0.25)))
-            })
+            .child(div().id("clip-preview").size_full().overflow_y_scroll().track_scroll(s).pr(px(14.)).child(content))
+            .child(self.scrollbar(Scroller::Handle(s.clone()), cx))
             .into_any_element()
     }
 
-    fn clip_preview(&self) -> AnyElement {
+    /// The scrollbar on the right of a scroll area: the thumb widens and
+    /// brightens on hover; drag it to scroll; click the track above or below
+    /// it to move a page.
+    fn scrollbar(&self, scroller: Scroller, cx: &mut Context<Self>) -> AnyElement {
+        let (viewport, max, y) = scroller.metrics();
+        let view = viewport.size.height;
+        let Some((h, top)) = scroll_thumb(view, max, y) else { return div().into_any_element() };
+        let dragging = self.clip.drag.is_some();
+        let ratio = if view > h { max / (view - h) } else { 0. };
+        div()
+            .id("clip-scrollbar")
+            .group("clip-scrollbar")
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .right(px(0.))
+            .w(px(12.))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                    let at = e.position.y - viewport.origin.y;
+                    if at >= top && at <= top + h {
+                        this.clip.drag = Some(Drag { scroller: scroller.clone(), grab_y: e.position.y, start: y, ratio });
+                    } else {
+                        // A page toward the click.
+                        let page = view * 0.9;
+                        scroller.scroll_to(if at < top { y - page } else { y + page });
+                    }
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .right(px(2.))
+                    .top(top)
+                    .h(h)
+                    .w(px(if dragging { 7. } else { 4. }))
+                    .rounded(px(3.5))
+                    .bg(white(if dragging { 0.55 } else { 0.25 }))
+                    .group_hover("clip-scrollbar", |s| s.w(px(7.)).bg(white(0.45))),
+            )
+            .into_any_element()
+    }
+
+    /// While the thumb is held: follow the mouse.
+    pub(super) fn clip_drag_move(&mut self, e: &MouseMoveEvent, _: &mut gpui::Window, cx: &mut Context<Self>) {
+        let Some(d) = &self.clip.drag else { return };
+        if e.pressed_button != Some(MouseButton::Left) {
+            self.clip.drag = None;
+            cx.notify();
+            return;
+        }
+        d.scroller.scroll_to(d.start + (e.position.y - d.grab_y) * d.ratio);
+        cx.notify();
+    }
+
+    pub(super) fn clip_drag_end(&mut self, _: &MouseUpEvent, _: &mut gpui::Window, cx: &mut Context<Self>) {
+        if self.clip.drag.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn clip_preview(&self, cx: &mut Context<Self>) -> AnyElement {
         let pane = div()
             .flex_1()
             .min_w_0()
@@ -483,12 +606,12 @@ impl Launcher {
                 )))
                 .into_any_element(),
             Kind::Text => match &self.clip.text {
-                Some(t) if t.id == e.id => self.text_list(t),
+                Some(t) if t.id == e.id => self.text_list(t, cx),
                 _ => div().into_any_element(),
             },
         };
         // File lists and skip notes scroll here; text scrolls in its own list.
-        let body = if matches!(e.kind, Kind::Files | Kind::Skipped) { self.scrollable(body) } else { body };
+        let body = if matches!(e.kind, Kind::Files | Kind::Skipped) { self.scrollable(body, cx) } else { body };
         let info = match e.kind {
             Kind::Image => e.image_size.map(|(w, h)| format!("{w} × {h} · {}", redsnap_core::clipboard::human_bytes(e.size_bytes))),
             Kind::Text => Some(format!("{} characters", e.text.chars().count())),

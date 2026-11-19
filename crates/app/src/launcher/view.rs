@@ -27,7 +27,11 @@ fn shortcut(n: usize) -> String {
 }
 
 impl Render for Launcher {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.in_clipboard() && self.preview_unmeasured() {
+            // Draw once more when the preview knows its size (for the scrollbar).
+            window.request_animation_frame();
+        }
         let has_query = !self.field.read(cx).is_empty();
         let rows = self.opts.rows;
         let count = self.hits.len();
@@ -158,6 +162,9 @@ impl Render for Launcher {
             .on_action(cx.listener(Self::run_secondary))
             .on_action(cx.listener(Self::toggle_actions))
             .on_action(cx.listener(Self::copy_entry))
+            .on_mouse_move(cx.listener(Self::clip_drag_move))
+            .on_mouse_up(gpui::MouseButton::Left, cx.listener(Self::clip_drag_end))
+            .on_mouse_up_out(gpui::MouseButton::Left, cx.listener(Self::clip_drag_end))
             .on_action(cx.listener(Self::preview_down))
             .on_action(cx.listener(Self::preview_up))
             .on_action(cx.listener(Self::dismiss))
