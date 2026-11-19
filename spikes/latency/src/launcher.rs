@@ -52,6 +52,12 @@ pub struct Options {
     /// but DWM never shows it and it gets no mouse input. Off-screen windows
     /// can't be used instead; Windows doesn't send them WM_PAINT.
     pub cloaked: bool,
+    /// The panel's corner radius: 20 by design, or the OS's own window radius
+    /// where the OS rounds the window (Windows 11).
+    pub radius: f32,
+    /// Opacity of the panel's dark fill; lower shows more of the blurred
+    /// desktop behind it.
+    pub alpha: f32,
 }
 
 pub struct Launcher {
@@ -219,9 +225,14 @@ pub async fn show(handle: WindowHandle<Launcher>, this: WeakEntity<Launcher>, st
         os::show(n);
     }
     perf::record("show_calls", started.elapsed().as_secs_f64() * 1000.0);
+    // No `window.activate_window()` on Windows: gpui's version replays its
+    // creation bounds and injects a fake Alt keypress (SendInput) to get the
+    // foreground. The process that received the hotkey may take it directly.
     if !opts.bench {
         os::take_focus(n);
-        handle.update(cx, |_, window, _| window.activate_window()).ok();
+        if !cfg!(windows) {
+            handle.update(cx, |_, window, _| window.activate_window()).ok();
+        }
     }
 }
 
@@ -234,6 +245,10 @@ fn white(alpha: f32) -> Hsla {
 }
 
 const RED: u32 = 0xE8344E;
+
+fn with_alpha(rgb: u32, alpha: f32) -> gpui::Rgba {
+    rgba((rgb << 8) | (alpha.clamp(0., 1.) * 255.).round() as u32)
+}
 
 impl Render for Launcher {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -254,13 +269,13 @@ impl Render for Launcher {
             .flex()
             .flex_col()
             .p(px(16.))
-            .rounded(px(20.))
+            .rounded(px(self.opts.radius))
             .border_1()
             .border_color(white(0.10))
             .bg(linear_gradient(
                 180.,
-                linear_color_stop(rgba(0x10181ECC), 0.),
-                linear_color_stop(rgba(0x161222D6), 1.),
+                linear_color_stop(with_alpha(0x10181E, self.opts.alpha), 0.),
+                linear_color_stop(with_alpha(0x161222, (self.opts.alpha + 0.04).min(1.)), 1.),
             ))
             .text_color(white(1.0))
             // Search row

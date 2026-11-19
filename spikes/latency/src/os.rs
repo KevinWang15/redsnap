@@ -36,12 +36,14 @@ mod windows {
     use super::{Native, Placement};
     use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
     use windows_sys::Win32::Graphics::Dwm::{
-        DWMWA_CLOAK, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND,
+        DWMSBT_TRANSIENTWINDOW, DWMWA_BORDER_COLOR, DWMWA_CLOAK, DWMWA_COLOR_NONE, DWMWA_SYSTEMBACKDROP_TYPE,
+        DWMWA_USE_IMMERSIVE_DARK_MODE, DwmExtendFrameIntoClientArea, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND,
         DwmSetWindowAttribute,
     };
     use windows_sys::Win32::Graphics::Gdi::{
         CreateRoundRectRgn, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, SetWindowRgn,
     };
+    use windows_sys::Win32::UI::Controls::MARGINS;
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetCursorPos, GetWindowRect, HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOSIZE,
@@ -52,24 +54,44 @@ mod windows {
         n.0 as HWND
     }
 
-    /// How the rounded panel's outside is cut off.
+    /// How the window's corners are shaped. Windows 11 draws its own rounded
+    /// corner and 1 px border; the panel must match it, or both show.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub enum Clip {
-        /// Windows 11 rounds the window (8 px). The 20 px panel corners leave
-        /// small blurred wedges outside them.
+        /// Windows 11 rounds the window (8 px, antialiased, clips the blur);
+        /// its border is turned off and the panel uses the same radius.
         Dwm,
-        /// A window region the shape of the panel: exact, but aliased.
+        /// No Windows rounding; a window region the shape of the 20 px panel.
+        /// Exact, but the edge is aliased.
         Region,
+        /// No clipping at all: square window, square blur.
         None,
     }
 
-    pub fn setup(n: Native, clip: Clip, panel_radius: f32) {
+    /// Windows 11's corner radius for rounded windows, in logical pixels.
+    pub const DWM_RADIUS: f32 = 8.0;
+
+    /// `system_backdrop`: Windows 11's own acrylic behind the window
+    /// (`DWMWA_SYSTEMBACKDROP_TYPE`), instead of gpui's `Blurred`, which uses
+    /// the undocumented `SetWindowCompositionAttribute`.
+    pub fn setup(n: Native, clip: Clip, panel_radius: f32, system_backdrop: bool) {
         let h = hwnd(n);
         unsafe {
+            if system_backdrop {
+                // The backdrop shows through the transparent parts of the
+                // frame, so extend the frame over the whole window.
+                let all = MARGINS { cxLeftWidth: -1, cxRightWidth: -1, cyTopHeight: -1, cyBottomHeight: -1 };
+                DwmExtendFrameIntoClientArea(h, &all);
+                let acrylic: i32 = DWMSBT_TRANSIENTWINDOW;
+                DwmSetWindowAttribute(h, DWMWA_SYSTEMBACKDROP_TYPE as u32, (&acrylic as *const i32).cast(), 4);
+            }
             let dark: i32 = 1;
             DwmSetWindowAttribute(h, DWMWA_USE_IMMERSIVE_DARK_MODE as u32, (&dark as *const i32).cast(), 4);
             let corner = if clip == Clip::Dwm { DWMWCP_ROUND } else { DWMWCP_DONOTROUND };
             DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE as u32, (&corner as *const i32).cast(), 4);
+            // Only the panel's own border shows.
+            let none: u32 = DWMWA_COLOR_NONE;
+            DwmSetWindowAttribute(h, DWMWA_BORDER_COLOR as u32, (&none as *const u32).cast(), 4);
             if clip == Clip::Region {
                 let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
                 GetWindowRect(h, &mut r);
@@ -164,7 +186,7 @@ mod linux {
         CONN.get_or_init(|| x11rb::connect(None).map_err(|e| log::warn!("x11 connect: {e}")).ok()).as_ref()
     }
 
-    pub fn setup(_: Native, _: Clip, _: f32) {}
+    pub fn setup(_: Native, _: Clip, _: f32, _: bool) {}
 
     pub fn placement_at_cursor(_: Native, size: (f32, f32)) -> Placement {
         let Some((c, screen)) = conn() else { return Placement { x: 0, y: 0 } };
@@ -225,7 +247,7 @@ mod macos {
         None,
     }
 
-    pub fn setup(_: Native, _: Clip, _: f32) {}
+    pub fn setup(_: Native, _: Clip, _: f32, _: bool) {}
     pub fn placement_at_cursor(_: Native, _: (f32, f32)) -> Placement {
         Placement { x: 0, y: 0 }
     }

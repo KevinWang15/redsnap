@@ -3,7 +3,7 @@
 //! gpui presents.
 //!
 //! ```text
-//! redsnap-spike [--paint=stock|now] [--glass=blur|transparent|opaque]
+//! redsnap-spike [--paint=stock|now] [--glass=blur|backdrop|transparent|opaque] [--alpha=0.6]
 //!               [--clip=dwm|region|none] [--hotkey=Ctrl+Alt+R]
 //!               [--bench[=SHOWS]] [--onscreen] [--perf=perf.jsonl]
 //! ```
@@ -37,6 +37,8 @@ use launcher::{Launcher, Options, PaintMode};
 struct Args {
     paint: PaintMode,
     glass: WindowBackgroundAppearance,
+    system_backdrop: bool,
+    alpha: f32,
     clip: os::Clip,
     hotkey: String,
     bench: Option<usize>,
@@ -48,6 +50,8 @@ fn parse_args() -> Args {
     let mut a = Args {
         paint: PaintMode::Now,
         glass: WindowBackgroundAppearance::Blurred,
+        system_backdrop: false,
+        alpha: 0.6,
         clip: os::Clip::Dwm,
         hotkey: "Ctrl+Alt+R".into(),
         bench: None,
@@ -59,9 +63,11 @@ fn parse_args() -> Args {
         match k {
             "--paint" => a.paint = if v == "stock" { PaintMode::Stock } else { PaintMode::Now },
             "--glass" => {
+                a.system_backdrop = v == "backdrop";
                 a.glass = match v {
                     "transparent" => WindowBackgroundAppearance::Transparent,
-                    "opaque" => WindowBackgroundAppearance::Opaque,
+                    // gpui's own blur off; Windows 11's backdrop is set up in os::setup.
+                    "opaque" | "backdrop" => WindowBackgroundAppearance::Opaque,
                     _ => WindowBackgroundAppearance::Blurred,
                 }
             }
@@ -73,6 +79,7 @@ fn parse_args() -> Args {
                 }
             }
             "--hotkey" => a.hotkey = v.into(),
+            "--alpha" => a.alpha = v.parse().unwrap_or(a.alpha),
             "--bench" => a.bench = Some(v.parse().unwrap_or(30)),
             "--onscreen" => a.onscreen = true,
             "--perf" => a.perf = v.into(),
@@ -80,6 +87,16 @@ fn parse_args() -> Args {
         }
     }
     a
+}
+
+#[cfg(windows)]
+fn panel_radius(clip: os::Clip) -> f32 {
+    if clip == os::Clip::Dwm { os::DWM_RADIUS } else { 20. }
+}
+
+#[cfg(not(windows))]
+fn panel_radius(_: os::Clip) -> f32 {
+    20.
 }
 
 const QUERIES: &[&str] = &["safari", "vsc", "sys", "微信", "bitwig", "code", "term", "photo", "studio", "red"];
@@ -97,7 +114,13 @@ fn main() {
         PaintMode::Now => "now",
     };
     perf::init(&args.perf, mode);
-    log::info!("paint mode {mode}, glass {:?}, clip {:?}", args.glass, args.clip);
+    log::info!(
+        "paint mode {mode}, glass {:?} (system backdrop {}), clip {:?}, alpha {}",
+        args.glass,
+        args.system_backdrop,
+        args.clip,
+        args.alpha
+    );
 
     Application::new().run(move |cx| {
         query_field::bind_keys(cx);
@@ -106,6 +129,8 @@ fn main() {
             paint: args.paint,
             bench: args.bench.is_some(),
             cloaked: args.bench.is_some() && cfg!(windows) && !args.onscreen,
+            radius: panel_radius(args.clip),
+            alpha: args.alpha,
         };
         let bounds = Bounds { origin: point(px(0.), px(0.)), size: size(px(launcher::WIDTH), px(launcher::HEIGHT)) };
         let created = Instant::now();
@@ -138,9 +163,10 @@ fn main() {
         perf::record("window_created", created.elapsed().as_secs_f64() * 1000.0);
         let entity = handle.update(cx, |_, _, cx| cx.entity().downgrade()).expect("launcher entity");
         let clip = args.clip;
+        let system_backdrop = args.system_backdrop;
         cx.spawn(async move |_| {
             if let Some(n) = native {
-                os::setup(n, clip, 20.);
+                os::setup(n, clip, panel_radius(clip), system_backdrop);
                 // Created hidden; make sure it stays that way until the first show.
                 os::hide(n);
             }

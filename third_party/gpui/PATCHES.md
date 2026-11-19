@@ -17,6 +17,12 @@ change is marked `redsnap patch` in the source.
   (outside) position as a mouse move. Upstream only clears the hovered flag, and
   hover is hit-tested against the last position seen (still inside), so hover
   styles and the cursor shape could stick.
+- `src/platform/windows/window.rs`: a window created hidden (`show: false`) gets
+  its bounds at creation (`SetWindowPlacement` with `SW_HIDE`). Upstream stores
+  them and applies them on the first `activate()`, so a hidden window the app
+  had positioned itself jumped back to its creation bounds the first time it was
+  activated. Upstream also deferred maximize/fullscreen requests made while
+  hidden; with this change those requests do nothing on a hidden window.
 - `src/platform/windows/util.rs`: `CursorStyle::ClosedHand` maps to the move
   cursor (`IDC_SIZEALL`); upstream shows the arrow.
 

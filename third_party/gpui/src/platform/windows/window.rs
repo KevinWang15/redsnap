@@ -473,10 +473,12 @@ impl WindowsWindow {
         if params.show {
             unsafe { SetWindowPlacement(hwnd, &placement)? };
         } else {
-            this.state.borrow_mut().initial_placement = Some(WindowOpenStatus {
-                placement,
-                state: WindowOpenState::Windowed,
-            });
+            // redsnap patch: give a hidden window its bounds now, still hidden.
+            // Upstream defers them to the first `activate()`, which moved a
+            // window the app had positioned itself back to its creation bounds.
+            let mut hidden = placement;
+            hidden.showCmd = SW_HIDE.0 as u32;
+            unsafe { SetWindowPlacement(hwnd, &hidden)? };
         }
 
         Ok(Self(this))

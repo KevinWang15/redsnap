@@ -7,14 +7,20 @@ about 1.25× scale, so measurements from it are divided by 1.25.
 ## Panel
 
 - A dark glass panel: the desktop behind it shows through blurred and darkened.
-- Fill: a vertical gradient from `rgba(16, 24, 30, 0.80)` at the top to
-  `rgba(22, 18, 34, 0.84)` at the bottom (slightly teal → slightly violet).
+- Fill: a vertical gradient from `rgba(16, 24, 30, 0.60)` at the top to
+  `rgba(22, 18, 34, 0.64)` at the bottom (slightly teal → slightly violet). The
+  blurred desktop must visibly show through; 0.80 looked opaque over a dark
+  desktop. The spike's `--alpha=` tunes it.
 - Border: 1 px `rgba(255, 255, 255, 0.10)`. Corner radius 20.
 - A soft drop shadow outside the panel, if the OS draws one for the window.
 - Padding: 16 around the content.
 - Backdrop per OS:
   - macOS: native window blur (gpui `WindowBackgroundAppearance::Blurred`).
   - Windows 11: acrylic behind the window, clipped to the rounded panel.
+    Windows rounds the window itself (8 px) with its own 1 px border; drawn
+    over that, a 20 px panel shows two corners. Either the panel uses Windows'
+    8 px radius with Windows' border off, or Windows' rounding is off and a
+    window region cuts 20 px corners (aliased). The spike has both.
   - Windows 10 and Linux without a blurring compositor: no blur, fill alpha
     raised to 0.94 so text stays readable on any wallpaper.
 
