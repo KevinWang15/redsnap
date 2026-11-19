@@ -473,12 +473,14 @@ spawned task after the current update returns. Tray menus are shown the same way
   The greedy leftmost subsequence matcher it replaces missed word boundaries
   (`vsc` matched the first `s`, not `Studio`).
 - Sort key, in order:
-  1. **Match class**: exact > prefix > word-prefix/acronym > substring > fuzzy. A
-     literal match must never lose to scattered fuzzy letters. This was a real bug
-     in long-text search.
-  2. **Learned boost for this query** (§5.7).
-  3. Matcher score + a small global frequency/recency term.
-  4. Provider priority (enum order), then `ItemId` for stable ties.
+  1. **Literal before fuzzy**: a literal match (exact, prefix, word-prefix/acronym,
+     substring) never loses to scattered fuzzy letters, whatever was learned.
+     This was a real bug in long-text search.
+  2. **Learned boost for this query** (§5.7): picking Chrome for "c" puts it
+     above other literal matches of "c".
+  3. **Match class**: exact > prefix > word-prefix/acronym > substring.
+  4. Matcher score + a small global frequency/recency term.
+  5. Provider priority (enum order), then `ItemId` for stable ties.
 - Calculator and URL/path rows get a fixed slot when they apply. A typed expression
   shows the result first; it is never outranked by an app that fuzzily matches
   `2*3`.

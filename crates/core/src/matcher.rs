@@ -43,6 +43,9 @@ impl Match {
 #[derive(Clone, Debug)]
 pub struct Haystack {
     folded: String,
+    chars: u32,
+    /// Which letters and digits occur (see [`char_mask`]).
+    mask: u64,
     word_starts: Vec<usize>,
     acronym: String,
     utf32: Utf32String,
@@ -56,7 +59,9 @@ impl Haystack {
         let word_starts = text::word_starts(original, &folded);
         let acronym = text::acronym(original, &folded);
         let utf32 = Utf32String::from(folded.as_str());
-        Haystack { folded, word_starts, acronym, utf32, exact_allowed }
+        let chars = folded.chars().count() as u32;
+        let mask = char_mask(&folded);
+        Haystack { folded, chars, mask, word_starts, acronym, utf32, exact_allowed }
     }
 }
 
@@ -92,6 +97,9 @@ impl Names {
 /// A query prepared once per keystroke.
 pub struct PreparedQuery {
     folded: String,
+    /// Without spaces, for initials: `v s c` → `vsc`.
+    compact: String,
+    mask: u64,
     pattern: Pattern,
 }
 
@@ -99,7 +107,9 @@ impl PreparedQuery {
     pub fn new(query: &str) -> Self {
         let folded = text::fold(query.trim());
         let pattern = Pattern::new(&folded, CaseMatching::Ignore, Normalization::Never, AtomKind::Fuzzy);
-        PreparedQuery { folded, pattern }
+        let compact: String = folded.chars().filter(|c| !c.is_whitespace()).collect();
+        let mask = char_mask(&compact);
+        PreparedQuery { folded, compact, mask, pattern }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -120,8 +130,13 @@ impl PreparedQuery {
         if q.is_empty() {
             return None;
         }
+        // Every match kind needs every query character somewhere in the name,
+        // except initials, which are letters of the name too.
+        if self.mask & !h.mask != 0 {
+            return None;
+        }
         // Shorter names first within a class: "Code" before "Code Insiders".
-        let short = 1000u32.saturating_sub(h.folded.chars().count() as u32);
+        let short = 1000u32.saturating_sub(h.chars);
         let literal = |class| Some(Match { class, score: 10_000 + short });
         if h.exact_allowed && h.folded == q {
             return literal(MatchClass::Exact);
@@ -129,9 +144,9 @@ impl PreparedQuery {
         if h.folded.starts_with(q) {
             return literal(MatchClass::Prefix);
         }
-        let q_compact: String = q.chars().filter(|c| !c.is_whitespace()).collect();
+        let compact = self.compact.as_str();
         if h.word_starts.iter().any(|&i| h.folded[i..].starts_with(q))
-            || (q_compact.chars().count() >= 2 && h.acronym.starts_with(&q_compact))
+            || (compact.len() >= 2 && h.acronym.starts_with(compact))
         {
             return literal(MatchClass::WordPrefix);
         }
@@ -141,6 +156,19 @@ impl PreparedQuery {
         let score = self.pattern.score(h.utf32.slice(..), matcher)?;
         Some(Match { class: MatchClass::Fuzzy, score: score + short / 10 })
     }
+}
+
+/// One bit per ASCII letter and digit, and one for "anything else", so a
+/// name that lacks a query character is skipped before any real matching.
+fn char_mask(s: &str) -> u64 {
+    s.chars().fold(0, |m, c| {
+        m | match c {
+            'a'..='z' => 1 << (c as u32 - 'a' as u32),
+            '0'..='9' => 1 << (26 + c as u32 - '0' as u32),
+            c if c.is_whitespace() => 0,
+            _ => 1 << 36,
+        }
+    })
 }
 
 /// The matcher scratch space; one per thread.

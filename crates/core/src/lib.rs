@@ -3,6 +3,11 @@
 //! any platform.
 
 pub mod calc;
+pub mod config;
 pub mod item;
 pub mod matcher;
+pub mod providers;
+pub mod query;
+pub mod search;
 pub mod text;
+pub mod usage;
