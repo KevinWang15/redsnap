@@ -1,13 +1,16 @@
 //! The search window, drawn to docs/design.md, and its show/hide sequence.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
     AnyElement, AppContext, AsyncApp, BoxShadow, Context, Entity, FocusHandle, Focusable, Hsla, InteractiveElement, IntoElement,
     KeyBinding, ParentElement, Render, SharedString, Styled, WeakEntity, Window, WindowHandle, actions, div, img,
-    linear_color_stop, linear_gradient, point, prelude::FluentBuilder, px, rgb, rgba,
+    ObjectFit, RenderImage, StyledImage, linear_color_stop, linear_gradient, point, prelude::FluentBuilder, px, rgb,
+    rgba,
 };
 
+use crate::backdrop;
 use crate::catalog::{Catalog, Hit};
 use crate::os::{self, Native};
 use crate::perf;
@@ -58,6 +61,12 @@ pub struct Options {
     /// Opacity of the panel's dark fill; lower shows more of the blurred
     /// desktop behind it.
     pub alpha: f32,
+    /// Matte glass: the screen under the window, captured just before each
+    /// show and blurred by us (`backdrop.rs`), under the panel's fill. Bench
+    /// runs blur a synthetic picture instead and never read the screen.
+    pub matte: bool,
+    /// Matte blur radius in physical pixels.
+    pub blur: f32,
 }
 
 pub struct Launcher {
@@ -69,6 +78,10 @@ pub struct Launcher {
     pub native: Option<Native>,
     pub visible: bool,
     opts: Options,
+    backdrop: Option<Arc<RenderImage>>,
+    /// The last backdrop, taken off screen on hide; its texture is freed on
+    /// the next show (that needs the window).
+    stale_backdrop: Option<Arc<RenderImage>>,
     _subs: Vec<gpui::Subscription>,
 }
 
@@ -92,6 +105,8 @@ impl Launcher {
             native: None,
             visible: false,
             opts,
+            backdrop: None,
+            stale_backdrop: None,
             _subs: subs,
         };
         this.hits = this.catalog.search("", LIMIT);
@@ -131,11 +146,21 @@ impl Launcher {
         cx.notify();
     }
 
+    /// Replaces the matte backdrop, freeing the old one's GPU texture.
+    fn set_backdrop(&mut self, image: Option<Arc<RenderImage>>, window: &mut Window, cx: &mut Context<Self>) {
+        for old in [std::mem::replace(&mut self.backdrop, image), self.stale_backdrop.take()].into_iter().flatten() {
+            window.drop_image(old).ok();
+        }
+        cx.notify();
+    }
+
     pub fn hide(&mut self, cx: &mut Context<Self>) {
         if !self.visible {
             return;
         }
         self.visible = false;
+        // The picture of the screen isn't drawn again once hidden.
+        self.stale_backdrop = self.backdrop.take();
         let native = self.native;
         cx.spawn(async move |_, cx| {
             if cfg!(target_os = "macos") {
@@ -210,6 +235,21 @@ pub async fn show(handle: WindowHandle<Launcher>, this: WeakEntity<Launcher>, st
     }
     let Some(n) = native else { return };
     os::place(n, os::placement_at_cursor(n, (WIDTH, HEIGHT)));
+    if opts.matte {
+        let t = Instant::now();
+        // The window is hidden (or cloaked) here, so it isn't in the capture.
+        let shot = if opts.bench {
+            let (w, h) = os::physical_size(n);
+            Some((w, h, backdrop::synthetic(w, h)))
+        } else {
+            os::capture_behind(n)
+        };
+        let captured = t.elapsed().as_secs_f64() * 1000.0;
+        let image = shot.map(|(w, h, bgra)| backdrop::blur(w, h, &bgra, opts.blur));
+        perf::record("backdrop_capture", captured);
+        perf::record("backdrop_capture_blur", t.elapsed().as_secs_f64() * 1000.0);
+        handle.update(cx, |launcher, window, cx| launcher.set_backdrop(image, window, cx)).ok();
+    }
     if opts.cloaked {
         os::set_cloaked(n, true);
         os::show(n);
@@ -258,25 +298,14 @@ impl Render for Launcher {
             .map(|i| self.row(i, i == self.selected, i - self.top))
             .collect();
 
-        div()
-            .key_context(CONTEXT)
-            .on_action(cx.listener(Self::select_next))
-            .on_action(cx.listener(Self::select_prev))
-            .on_action(cx.listener(Self::run))
-            .on_action(cx.listener(Self::dismiss))
-            .on_action(cx.listener(Self::quit))
+        let radius = px(self.opts.radius);
+        let layer = || div().absolute().top_0().left_0().size_full().rounded(radius);
+        let content = div()
+            .relative()
             .size_full()
             .flex()
             .flex_col()
             .p(px(16.))
-            .rounded(px(self.opts.radius))
-            .border_1()
-            .border_color(white(0.10))
-            .bg(linear_gradient(
-                180.,
-                linear_color_stop(with_alpha(0x10181E, self.opts.alpha), 0.),
-                linear_color_stop(with_alpha(0x161222, (self.opts.alpha + 0.04).min(1.)), 1.),
-            ))
             .text_color(white(1.0))
             // Search row
             .child(
@@ -293,7 +322,8 @@ impl Render for Launcher {
                             .items_center()
                             .gap(px(10.))
                             .rounded(px(12.))
-                            .bg(rgba(0x080C128C))
+                            // Opaque: the query must read on any background.
+                            .bg(rgb(0x0B0F16))
                             .border_1()
                             .border_color(rgba(0xE12D4673))
                             .child(self.field.clone())
@@ -345,7 +375,30 @@ impl Render for Launcher {
                     .child(key_hint("↑↓", "Navigate"))
                     .child(div().w(px(16.)))
                     .child(key_hint("↵", "Open")),
-            )
+            );
+
+        div()
+            .key_context(CONTEXT)
+            .on_action(cx.listener(Self::select_next))
+            .on_action(cx.listener(Self::select_prev))
+            .on_action(cx.listener(Self::run))
+            .on_action(cx.listener(Self::dismiss))
+            .on_action(cx.listener(Self::quit))
+            .relative()
+            .size_full()
+            .rounded(radius)
+            // Matte glass: the blurred screen, then the dark fill over it.
+            .when_some(self.backdrop.clone(), |d, image| {
+                d.child(layer().child(img(image).size_full().rounded(radius).object_fit(ObjectFit::Fill)))
+            })
+            .child(layer().bg(linear_gradient(
+                180.,
+                linear_color_stop(with_alpha(0x10181E, self.opts.alpha), 0.),
+                linear_color_stop(with_alpha(0x161222, (self.opts.alpha + 0.04).min(1.)), 1.),
+            )))
+            .child(content)
+            // The border goes on top of everything.
+            .child(layer().border_1().border_color(white(0.10)))
     }
 }
 

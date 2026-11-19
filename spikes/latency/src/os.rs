@@ -156,6 +156,57 @@ mod windows {
     }
 
     pub const CAN_PAINT_NOW: bool = true;
+
+    /// The screen pixels under the window (which must be hidden or cloaked,
+    /// so it isn't in the picture), as tightly packed BGRA rows.
+    pub fn capture_behind(n: Native) -> Option<(usize, usize, Vec<u8>)> {
+        use windows_sys::Win32::Graphics::Gdi::{
+            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS,
+            DeleteDC, DeleteObject, GetDC, ReleaseDC, SRCCOPY, SelectObject,
+        };
+        unsafe {
+            let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+            GetWindowRect(hwnd(n), &mut r);
+            let (w, h) = (r.right - r.left, r.bottom - r.top);
+            if w <= 0 || h <= 0 {
+                return None;
+            }
+            let screen = GetDC(std::ptr::null_mut());
+            let dc = CreateCompatibleDC(screen);
+            let mut info: BITMAPINFO = std::mem::zeroed();
+            info.bmiHeader = BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: w,
+                biHeight: -h, // top-down
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB,
+                ..std::mem::zeroed()
+            };
+            let mut bits = std::ptr::null_mut();
+            let bmp = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, std::ptr::null_mut(), 0);
+            let mut out = None;
+            if !bmp.is_null() && !bits.is_null() {
+                let old = SelectObject(dc, bmp);
+                if BitBlt(dc, 0, 0, w, h, screen, r.left, r.top, SRCCOPY) != 0 {
+                    let len = (w * h * 4) as usize;
+                    out = Some((w as usize, h as usize, std::slice::from_raw_parts(bits as *const u8, len).to_vec()));
+                }
+                SelectObject(dc, old);
+                DeleteObject(bmp);
+            }
+            DeleteDC(dc);
+            ReleaseDC(std::ptr::null_mut(), screen);
+            out
+        }
+    }
+
+    /// The window's size in physical pixels.
+    pub fn physical_size(n: Native) -> (usize, usize) {
+        let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        unsafe { GetWindowRect(hwnd(n), &mut r) };
+        ((r.right - r.left).max(1) as usize, (r.bottom - r.top).max(1) as usize)
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -229,6 +280,14 @@ mod linux {
     }
 
     pub const CAN_PAINT_NOW: bool = false;
+
+    pub fn capture_behind(_: Native) -> Option<(usize, usize, Vec<u8>)> {
+        None
+    }
+
+    pub fn physical_size(_: Native) -> (usize, usize) {
+        (760, 474)
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -258,4 +317,12 @@ mod macos {
     pub fn paint_now(_: Native) {}
     pub fn take_focus(_: Native) {}
     pub const CAN_PAINT_NOW: bool = false;
+
+    pub fn capture_behind(_: Native) -> Option<(usize, usize, Vec<u8>)> {
+        None
+    }
+
+    pub fn physical_size(_: Native) -> (usize, usize) {
+        (760, 474)
+    }
 }

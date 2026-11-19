@@ -3,7 +3,8 @@
 //! gpui presents.
 //!
 //! ```text
-//! redsnap-spike [--paint=stock|now] [--glass=blur|backdrop|transparent|opaque] [--alpha=0.6]
+//! redsnap-spike [--paint=stock|now] [--glass=matte|blur|backdrop|transparent|opaque]
+//!               [--alpha=0.6] [--blur=14]
 //!               [--clip=dwm|region|none] [--hotkey=Ctrl+Alt+R]
 //!               [--bench[=SHOWS]] [--onscreen] [--perf=perf.jsonl]
 //! ```
@@ -15,6 +16,7 @@
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod backdrop;
 mod catalog;
 mod launcher;
 mod os;
@@ -38,6 +40,8 @@ struct Args {
     paint: PaintMode,
     glass: WindowBackgroundAppearance,
     system_backdrop: bool,
+    matte: bool,
+    blur: f32,
     alpha: f32,
     clip: os::Clip,
     hotkey: String,
@@ -51,6 +55,8 @@ fn parse_args() -> Args {
         paint: PaintMode::Now,
         glass: WindowBackgroundAppearance::Blurred,
         system_backdrop: false,
+        matte: false,
+        blur: 14.,
         alpha: 0.6,
         clip: os::Clip::Dwm,
         hotkey: "Ctrl+Alt+R".into(),
@@ -64,8 +70,11 @@ fn parse_args() -> Args {
             "--paint" => a.paint = if v == "stock" { PaintMode::Stock } else { PaintMode::Now },
             "--glass" => {
                 a.system_backdrop = v == "backdrop";
+                a.matte = v == "matte";
                 a.glass = match v {
-                    "transparent" => WindowBackgroundAppearance::Transparent,
+                    // Matte draws its own blurred backdrop over a fully
+                    // transparent window, with our own 20 px corners.
+                    "transparent" | "matte" => WindowBackgroundAppearance::Transparent,
                     // gpui's own blur off; Windows 11's backdrop is set up in os::setup.
                     "opaque" | "backdrop" => WindowBackgroundAppearance::Opaque,
                     _ => WindowBackgroundAppearance::Blurred,
@@ -80,6 +89,7 @@ fn parse_args() -> Args {
             }
             "--hotkey" => a.hotkey = v.into(),
             "--alpha" => a.alpha = v.parse().unwrap_or(a.alpha),
+            "--blur" => a.blur = v.parse().unwrap_or(a.blur),
             "--bench" => a.bench = Some(v.parse().unwrap_or(30)),
             "--onscreen" => a.onscreen = true,
             "--perf" => a.perf = v.into(),
@@ -129,8 +139,10 @@ fn main() {
             paint: args.paint,
             bench: args.bench.is_some(),
             cloaked: args.bench.is_some() && cfg!(windows) && !args.onscreen,
-            radius: panel_radius(args.clip),
+            radius: if args.matte { 20. } else { panel_radius(args.clip) },
             alpha: args.alpha,
+            matte: args.matte,
+            blur: args.blur,
         };
         let bounds = Bounds { origin: point(px(0.), px(0.)), size: size(px(launcher::WIDTH), px(launcher::HEIGHT)) };
         let created = Instant::now();
@@ -162,11 +174,12 @@ fn main() {
             .flatten();
         perf::record("window_created", created.elapsed().as_secs_f64() * 1000.0);
         let entity = handle.update(cx, |_, _, cx| cx.entity().downgrade()).expect("launcher entity");
-        let clip = args.clip;
+        // Matte: no Windows rounding or border; the panel draws its own corners.
+        let clip = if args.matte { os::Clip::None } else { args.clip };
         let system_backdrop = args.system_backdrop;
         cx.spawn(async move |_| {
             if let Some(n) = native {
-                os::setup(n, clip, panel_radius(clip), system_backdrop);
+                os::setup(n, clip, if clip == os::Clip::None { 20. } else { panel_radius(clip) }, system_backdrop);
                 // Created hidden; make sure it stays that way until the first show.
                 os::hide(n);
             }
