@@ -70,8 +70,8 @@ Non-goals for now (each one was expensive and gave little value before):
 
 | Phase | Theme | Contents |
 |---|---|---|
-| **1** | Core launcher | Search window, app search + launch on all three OSes, calculator, web searches and quick links, open URL/path, RedSnap and system commands, action panel, learned ranking, tray, hotkey, start at login, single instance, Electron settings. |
-| 2 | Clipboard and files | Clipboard history (native view, it needs the same instant search), paste into the previous app, snippets with text expansion, file search (Everything on Windows, Spotlight on macOS, plocate/fd on Linux), folder browsing. |
+| **1** | Core launcher | Search window, app search + launch on all three OSes, calculator, web searches and quick links, open URL/path, RedSnap and system commands, action panel, learned ranking, tray, hotkey, start at login, single instance, Electron settings. Then clipboard history (native view, it needs the same instant search) with paste into the previous app ([docs/clipboard.md](docs/clipboard.md)). |
+| 2 | Snippets and files | Snippets with text expansion, file search (Everything on Windows, Spotlight on macOS, plocate/fd on Linux), folder browsing. |
 | 3 | Extensions | Plugin protocol (JSON-RPC over stdio, long-lived process option), window switcher, per-plugin hotkeys, plugin management pages in Electron. |
 
 Phase 1 is the subject of the rest of this document. Phases 2 and 3 appear only
@@ -150,6 +150,15 @@ characters: `wx` and `weixin` both find 微信.
   (app count, last scan, scan time), version.
 - Opened from the tray, from the `settings` command, or by `redsnap settings`.
   Changes apply immediately without a restart.
+
+### 3.6 Clipboard history (after the core launcher)
+
+Designed in [docs/clipboard.md](docs/clipboard.md). The two rules that matter:
+
+- Every copy is accounted for: in the history, or listed as skipped with the
+  reason.
+- Search shows only entries that contain every typed word; newest first; matches
+  highlighted.
 
 ---
 
@@ -759,19 +768,19 @@ A spike is a short experiment with throwaway code that answers one question.
 | M2 | **Launcher UI on Linux** | Window, query field, results, action panel, theme, empty state, tray (ksni), hotkey, single instance + CLI, start at login, demo harness running. |
 | M3 | **Platform backends** | App discovery, icons and launch on Windows, macOS and Linux; system commands; session lock hide. |
 | M4 | **Settings app** | Electron app, IPC protocol, config ownership with revisions, shortcut recorder with suspend, all settings applied live. |
-| M5 | **Packaging + CI + dogfood** | Packages for three OSes from CI; budgets met on a real Windows and Mac machine; a week of daily use without a crash. |
+| M5 | **Clipboard history** | docs/clipboard.md on Windows, macOS and X11: capture with every copy accounted for, literal search, preview, paste back. |
+| M6 | **Packaging + CI + dogfood** | Packages for three OSes from CI; budgets met on a real Windows and Mac machine; a week of daily use without a crash. |
 
 Rough order of work after M0: M1 and M2 in parallel on Linux; M3 per OS, Windows
-then macOS; M4; M5.
+then macOS; M4; M5; M6.
 
 ---
 
 ## 8. Open questions
 
 1. Decided (§0): hosted on GitHub, built with GitHub Actions.
-2. **Clipboard history in phase 1 or phase 2.** This plan puts it in phase 2
-   because it is a separate OS surface on each platform (capture, privacy markers,
-   paste-back).
+2. Decided (2026-11-19): clipboard history is in phase 1, built after the core
+   launcher (M5).
 3. **Wayland priority.** Phase 1 covers it through `redsnap toggle`. A native
    portal shortcut would come later.
 4. **Default shortcut.** Alt+Space / Option+Space. These conflict with the Windows
