@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["spikes/latency"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[patch.crates-io]
+# Vendored gpui 0.2.2 with the patches listed in third_party/gpui/PATCHES.md.
+gpui = { path = "third_party/gpui" }
+# gpui 0.2.2 pulls in xattr 0.2.3, which no longer builds on Linux against
+# current libc (ENOATTR was removed there).
+xattr = { path = "third_party/xattr" }
