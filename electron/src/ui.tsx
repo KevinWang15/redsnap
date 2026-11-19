@@ -27,16 +27,19 @@ export function Row({ label, hint, children }: { label: string; hint?: ReactNode
 }
 
 export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+  // The knob is a flex child, centered by layout and moved with a transform,
+  // so it stays centered at any display scale (absolute 2 px offsets rounded
+  // unevenly at 125%).
   return (
     <button
       role="switch"
       aria-checked={checked}
       aria-label={label}
       onClick={() => onChange(!checked)}
-      className={`relative h-6 w-11 rounded-full transition-colors ${checked ? 'bg-red-500' : 'bg-ink-700'}`}
+      className={`box-border inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors ${checked ? 'bg-red-500' : 'bg-ink-700'}`}
     >
       <span
-        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${checked ? 'left-[22px]' : 'left-0.5'}`}
+        className={`block h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-5' : 'translate-x-0'}`}
       />
     </button>
   )
