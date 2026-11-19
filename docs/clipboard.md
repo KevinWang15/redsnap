@@ -77,6 +77,13 @@ Rules:
   front before RedSnap opened (Ctrl+V / Cmd+V sent once that app has focus
   again).
 - **Cmd/Ctrl+C** copies it without pasting.
+- **Ctrl+P** (Cmd+P) pins or unpins it: pinned entries stay at the top of the
+  full list and retention never removes them.
+- **Ctrl+Delete** (Cmd+Backspace on macOS) deletes it; the selection moves to
+  the next entry.
+- **Tab** opens the actions: Paste, Copy, Pin/Unpin, Delete.
+- The preview scrolls with the wheel, Shift+PageUp/PageDown and its scrollbar
+  (drag the thumb, click the track); long texts preview whole.
 - The pasted entry moves to the top.
 - macOS needs the Accessibility permission to send Cmd+V. Without it, Enter
   only copies and the footer says so.

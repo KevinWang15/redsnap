@@ -41,6 +41,39 @@ pub struct ClipView {
     pub text: Option<TextPreview>,
     /// The scrollbar thumb being dragged.
     drag: Option<Drag>,
+    /// The Tab panel's selected action, while it's open.
+    pub panel: Option<usize>,
+    /// After a delete, keep the selection at this position (the next entry).
+    keep_index: Option<usize>,
+}
+
+/// What the Tab panel offers for an entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClipAction {
+    Paste,
+    Copy,
+    Pin,
+    Unpin,
+    Delete,
+}
+
+impl ClipAction {
+    fn label(self) -> &'static str {
+        match self {
+            ClipAction::Paste => "Paste",
+            ClipAction::Copy => "Copy",
+            ClipAction::Pin => "Pin",
+            ClipAction::Unpin => "Unpin",
+            ClipAction::Delete => "Delete",
+        }
+    }
+}
+
+fn actions_for(e: &Entry) -> Vec<ClipAction> {
+    if e.kind == Kind::Skipped {
+        return vec![ClipAction::Delete];
+    }
+    vec![ClipAction::Paste, ClipAction::Copy, if e.pinned { ClipAction::Unpin } else { ClipAction::Pin }, ClipAction::Delete]
 }
 
 /// The text preview's line height.
@@ -195,9 +228,10 @@ impl Launcher {
         let keep = self.clip.found.get(self.clip.selected).map(|f| self.clip.history.entries[f.index].id.clone());
         let history = c.store.history();
         let found = history.search(&self.clip_query(), c.show_skipped, LIMIT);
-        self.clip.selected = keep
-            .and_then(|id| found.iter().position(|f| history.entries[f.index].id == id))
-            .unwrap_or(0);
+        self.clip.selected = match self.clip.keep_index.take() {
+            Some(i) => i.min(found.len().saturating_sub(1)),
+            None => keep.and_then(|id| found.iter().position(|f| history.entries[f.index].id == id)).unwrap_or(0),
+        };
         if self.clip.found.get(self.clip.selected).map(|f| &self.clip.history.entries[f.index].id)
             != found.get(self.clip.selected).map(|f| &history.entries[f.index].id)
         {
@@ -315,6 +349,76 @@ impl Launcher {
         cx.notify();
     }
 
+    pub(super) fn clip_current(&self) -> usize {
+        self.clip.panel.unwrap_or(self.clip.selected)
+    }
+
+    /// Moves within the Tab panel if it's open; `false` otherwise.
+    pub(super) fn clip_panel_move(&mut self, to: isize, cx: &mut Context<Self>) -> bool {
+        let Some(n) = self.selected_entry().map(|e| actions_for(e).len()) else { return false };
+        let Some(sel) = &mut self.clip.panel else { return false };
+        *sel = to.clamp(0, n as isize - 1) as usize;
+        cx.notify();
+        true
+    }
+
+    pub(super) fn clip_toggle_panel(&mut self, cx: &mut Context<Self>) {
+        self.clip.panel = if self.clip.panel.is_some() || self.selected_entry().is_none() { None } else { Some(0) };
+        cx.notify();
+    }
+
+    /// Enter: the panel's action if it's open, otherwise paste.
+    pub(super) fn clip_enter(&mut self, cx: &mut Context<Self>) {
+        let action = match (self.clip.panel.take(), self.selected_entry()) {
+            (Some(i), Some(e)) => actions_for(e).get(i).copied(),
+            _ => Some(ClipAction::Paste),
+        };
+        match action {
+            Some(ClipAction::Paste) => self.clip_use(true, cx),
+            Some(ClipAction::Copy) => self.clip_use(false, cx),
+            Some(ClipAction::Pin | ClipAction::Unpin) => self.clip_pin(cx),
+            Some(ClipAction::Delete) => self.clip_delete(cx),
+            None => cx.notify(),
+        }
+    }
+
+    /// Runs `op` on the store, waits for it to commit (off the UI thread), then
+    /// shows the new history.
+    fn after_store(&mut self, op: impl FnOnce(&ClipStore) + Send + 'static, cx: &mut Context<Self>) {
+        let Some(store) = cx.try_global::<Clipboard>().map(|c| c.store.clone()) else { return };
+        let done = cx.background_executor().spawn(async move {
+            op(&store);
+            store.flush();
+        });
+        cx.spawn(async move |this, cx| {
+            done.await;
+            this.update(cx, |l, cx| {
+                l.refresh_clipboard(cx);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Ctrl/Cmd+P: pins or unpins the selected entry. Pinned entries stay on
+    /// top of the full list and are never removed by retention.
+    pub(super) fn clip_pin(&mut self, cx: &mut Context<Self>) {
+        let Some(e) = self.selected_entry() else { return };
+        let (id, pinned) = (e.id.clone(), !e.pinned);
+        self.after_store(move |s| s.pin(&id, pinned), cx);
+    }
+
+    /// Ctrl+Delete / Cmd+Backspace: deletes the selected entry; the selection
+    /// moves to the next one.
+    pub(super) fn clip_delete(&mut self, cx: &mut Context<Self>) {
+        let Some(e) = self.selected_entry() else { return };
+        let id = e.id.clone();
+        self.clip.keep_index = Some(self.clip.selected);
+        self.clip.text = None;
+        self.after_store(move |s| s.delete(&id), cx);
+    }
+
     /// Enter: puts the entry on the clipboard and pastes it into the app that
     /// was in front. `paste: false` (Ctrl/Cmd+C) only copies.
     pub(super) fn clip_use(&mut self, paste: bool, cx: &mut Context<Self>) {
@@ -352,6 +456,7 @@ impl Launcher {
             .collect();
         let empty = self.clip.found.is_empty();
         div()
+            .relative()
             .mt(px(12.))
             .h(px(rows as f32 * 66.))
             .flex()
@@ -380,6 +485,11 @@ impl Launcher {
                     }),
             )
             .child(self.clip_preview(cx))
+            .when_some(self.clip.panel.zip(self.selected_entry()), |d, (sel, e)| {
+                let labels = actions_for(e).iter().map(|a| a.label().to_string()).collect();
+                let title: SharedString = first_line(&e.text, &[]).0.into();
+                d.child(super::view::panel_view(title, labels, sel))
+            })
             .into_any_element()
     }
 
@@ -403,7 +513,7 @@ impl Launcher {
             Kind::Skipped => ("–", format!("Not kept: {}", e.text), Vec::new()),
         };
         let app = e.source_app.clone().map(|a| a.trim_end_matches(".exe").to_string()).unwrap_or_else(|| "Unknown app".into());
-        let subtitle = format!("{app} · {}{}", ago(e.last_copied_at), if e.pinned { " · pinned" } else { "" });
+        let subtitle = format!("{app} · {}", ago(e.last_copied_at));
         let slot = i - self.clip.top;
         div()
             .id(("clip", i))
@@ -459,6 +569,7 @@ impl Launcher {
                             .child(subtitle),
                     ),
             )
+            .when(e.pinned, |d| d.child(div().flex_none().text_size(px(13.)).text_color(rgb(0xFFC94D)).child("★")))
             .into_any_element()
     }
 

@@ -139,7 +139,8 @@ impl Render for Launcher {
             .child(div().w(px(16.)))
             .child(key_hint("↵", if in_clip { "Paste" } else { "Open" }))
             .child(div().w(px(16.)))
-            .child(if in_clip { key_hint(copy_key, "Copy").into_any_element() } else { key_hint("⇥", "Actions").into_any_element() });
+            .when(in_clip, |d| d.child(key_hint(copy_key, "Copy")).child(div().w(px(16.))))
+            .child(key_hint("⇥", "Actions"));
 
         let content = div()
             .relative()
@@ -162,6 +163,8 @@ impl Render for Launcher {
             .on_action(cx.listener(Self::run_secondary))
             .on_action(cx.listener(Self::toggle_actions))
             .on_action(cx.listener(Self::copy_entry))
+            .on_action(cx.listener(Self::toggle_pin))
+            .on_action(cx.listener(Self::delete_entry))
             .on_mouse_move(cx.listener(Self::clip_drag_move))
             .on_mouse_up(gpui::MouseButton::Left, cx.listener(Self::clip_drag_end))
             .on_mouse_up_out(gpui::MouseButton::Left, cx.listener(Self::clip_drag_end))
@@ -294,6 +297,19 @@ fn icon(item: &Item, cx: &gpui::App) -> AnyElement {
 }
 
 fn action_panel(panel: &ActionPanel) -> impl IntoElement {
+    let labels = panel
+        .actions
+        .iter()
+        .map(|a| match a {
+            Action::CopyText(t) if *t == panel.item.title => "Copy name".to_string(),
+            a => a.label().to_string(),
+        })
+        .collect();
+    panel_view(panel.item.title.clone().into(), labels, panel.selected)
+}
+
+/// The Tab panel: a title and actions, the selected one highlighted.
+pub(super) fn panel_view(title: SharedString, labels: Vec<String>, selected: usize) -> impl IntoElement {
     div()
         .absolute()
         .right(px(8.))
@@ -313,12 +329,8 @@ fn action_panel(panel: &ActionPanel) -> impl IntoElement {
         .flex()
         .flex_col()
         .gap(px(2.))
-        .child(div().px(px(10.)).py(px(6.)).text_size(px(12.)).text_color(white(0.5)).truncate().child(panel.item.title.clone()))
-        .children(panel.actions.iter().enumerate().map(|(i, a)| {
-            let label = match a {
-                Action::CopyText(t) if *t == panel.item.title => "Copy name",
-                a => a.label(),
-            };
+        .child(div().px(px(10.)).py(px(6.)).text_size(px(12.)).text_color(white(0.5)).truncate().child(title))
+        .children(labels.into_iter().enumerate().map(|(i, label)| {
             div()
                 .px(px(10.))
                 .h(px(34.))
@@ -326,7 +338,7 @@ fn action_panel(panel: &ActionPanel) -> impl IntoElement {
                 .items_center()
                 .rounded(px(8.))
                 .text_size(px(14.))
-                .when(i == panel.selected, |d| d.bg(rgba(0xB3263AFF)))
+                .when(i == selected, |d| d.bg(rgba(0xB3263AFF)))
                 .child(label)
         }))
 }

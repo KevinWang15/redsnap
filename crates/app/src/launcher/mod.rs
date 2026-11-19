@@ -24,7 +24,7 @@ use query_field::{QueryChanged, QueryField};
 
 actions!(
     launcher,
-    [SelectNext, SelectPrev, PageDown, PageUp, PreviewDown, PreviewUp, Run, RunSecondary, ToggleActions, Dismiss, Run1, Run2, Run3, Run4, Run5, Run6, Run7, Run8, Run9]
+    [SelectNext, SelectPrev, PageDown, PageUp, PreviewDown, PreviewUp, TogglePin, DeleteEntry, Run, RunSecondary, ToggleActions, Dismiss, Run1, Run2, Run3, Run4, Run5, Run6, Run7, Run8, Run9]
 );
 
 const CONTEXT: &str = "Launcher";
@@ -47,6 +47,10 @@ pub fn bind_keys(cx: &mut gpui::App) {
         KeyBinding::new("pageup", PageUp, c),
         KeyBinding::new("shift-pagedown", PreviewDown, c),
         KeyBinding::new("shift-pageup", PreviewUp, c),
+        KeyBinding::new("secondary-p", TogglePin, c),
+        // Cmd+Backspace in Finder; Ctrl+Delete elsewhere (Ctrl+Backspace means
+        // "delete the previous word" in a text box).
+        KeyBinding::new(if cfg!(target_os = "macos") { "cmd-backspace" } else { "ctrl-delete" }, DeleteEntry, c),
         KeyBinding::new("enter", Run, c),
         KeyBinding::new("secondary-enter", RunSecondary, c),
         KeyBinding::new("tab", ToggleActions, c),
@@ -291,6 +295,9 @@ impl Launcher {
     }
 
     fn move_selection(&mut self, to: isize, cx: &mut Context<Self>) {
+        if self.in_clipboard() && self.clip_panel_move(to, cx) {
+            return;
+        }
         if self.panel.is_none() && self.in_clipboard() {
             self.clip_move(to, cx);
             self.paint_soon(cx);
@@ -311,8 +318,8 @@ impl Launcher {
     }
 
     fn current(&self) -> isize {
-        if self.panel.is_none() && self.in_clipboard() {
-            return self.clip.selected as isize;
+        if self.in_clipboard() {
+            return self.clip_current() as isize;
         }
         self.panel.as_ref().map_or(self.selected, |p| p.selected) as isize
     }
@@ -353,8 +360,21 @@ impl Launcher {
         }
     }
 
+    fn toggle_pin(&mut self, _: &TogglePin, _: &mut Window, cx: &mut Context<Self>) {
+        if self.in_clipboard() {
+            self.clip_pin(cx);
+        }
+    }
+
+    fn delete_entry(&mut self, _: &DeleteEntry, _: &mut Window, cx: &mut Context<Self>) {
+        if self.in_clipboard() {
+            self.clip_delete(cx);
+        }
+    }
+
     fn toggle_actions(&mut self, _: &ToggleActions, _: &mut Window, cx: &mut Context<Self>) {
         if self.in_clipboard() {
+            self.clip_toggle_panel(cx);
             return;
         }
         if self.panel.take().is_none()
@@ -374,7 +394,7 @@ impl Launcher {
     }
 
     fn dismiss(&mut self, _: &Dismiss, _: &mut Window, cx: &mut Context<Self>) {
-        if self.panel.take().is_some() || self.confirming.take().is_some() {
+        if self.panel.take().is_some() || self.confirming.take().is_some() || self.clip.panel.take().is_some() {
             cx.notify();
         } else {
             self.hide(cx);
@@ -383,7 +403,7 @@ impl Launcher {
 
     fn run(&mut self, _: &Run, _: &mut Window, cx: &mut Context<Self>) {
         if self.in_clipboard() {
-            self.clip_use(true, cx);
+            self.clip_enter(cx);
             return;
         }
         if let Some(panel) = self.panel.take() {
