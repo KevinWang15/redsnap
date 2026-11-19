@@ -312,6 +312,18 @@ mod macos {
     //! no-ops so the shared code compiles.
     use super::{Native, Placement};
 
+    /// Opts out of App Nap, which throttles a hidden app's timers (the bench
+    /// waits between steps would stretch from milliseconds to seconds). The
+    /// real app needs a decision here too: a hidden launcher is exactly what
+    /// App Nap targets.
+    pub fn keep_awake() {
+        use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
+        let reason = NSString::from_str("RedSnap latency bench");
+        let token = NSProcessInfo::processInfo()
+            .beginActivityWithOptions_reason(NSActivityOptions::UserInitiated | NSActivityOptions::LatencyCritical, &reason);
+        std::mem::forget(token);
+    }
+
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub enum Clip {
         Dwm,

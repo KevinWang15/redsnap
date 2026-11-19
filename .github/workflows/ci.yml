@@ -56,8 +56,8 @@ jobs:
           mkdir -p out
           set +e
           for mode in stock now; do
-            perl -e 'alarm shift; exec @ARGV' 180 \
-              ./target/release/redsnap-spike --bench=20 --paint=$mode --perf=out/bench-macos-$mode.jsonl
+            perl -e 'alarm shift; exec @ARGV' 300 \
+              ./target/release/redsnap-spike --bench=15 --paint=$mode --perf=out/bench-macos-$mode.jsonl
             echo "exit status for $mode: $?"
             cat out/bench-macos-$mode.summary.txt || echo "no summary for $mode"
           done

@@ -188,6 +188,8 @@ fn main() {
         .detach();
 
         if let Some(shows) = args.bench {
+            #[cfg(target_os = "macos")]
+            os::keep_awake();
             cx.spawn(async move |cx| {
                 let executor = cx.background_executor().clone();
                 let timer = |ms| executor.timer(Duration::from_millis(ms));

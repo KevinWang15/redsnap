@@ -30,5 +30,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_SystemInformation",
 ] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3", features = ["NSProcessInfo", "NSString"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = "0.13"
