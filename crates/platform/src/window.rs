@@ -1,6 +1,5 @@
 //! The OS calls gpui doesn't offer for a pre-created window: show and hide it,
-//! place it, hide it from the compositor until it's painted, paint now, and
-//! capture the screen under it for the matte glass.
+//! place it, hide it from the compositor until it's painted, and paint now.
 //!
 //! Every call here can make the OS call back into gpui's window procedure
 //! synchronously, which panics ("RefCell already borrowed") inside a gpui
@@ -37,19 +36,16 @@ mod windows {
     use super::{Native, Placement};
     use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
     use windows_sys::Win32::Graphics::Dwm::{
-        DWMSBT_TRANSIENTWINDOW, DWMWA_BORDER_COLOR, DWMWA_CLOAK, DWMWA_COLOR_NONE, DWMWA_SYSTEMBACKDROP_TYPE,
-        DWMWA_USE_IMMERSIVE_DARK_MODE, DwmExtendFrameIntoClientArea, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND,
+        DWMWA_BORDER_COLOR, DWMWA_CLOAK, DWMWA_COLOR_NONE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND,
         DwmSetWindowAttribute,
     };
     use windows_sys::Win32::Graphics::Gdi::{
         CreateRoundRectRgn, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, SetWindowRgn,
     };
-    use windows_sys::Win32::UI::Controls::MARGINS;
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetCursorPos, GetWindowRect, HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOSIZE,
-        SendMessageW, SetForegroundWindow, SetWindowDisplayAffinity, SetWindowPos, ShowWindow, WDA_EXCLUDEFROMCAPTURE,
-        WDA_NONE, WM_PAINT,
+        SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, WM_PAINT,
     };
 
     fn hwnd(n: Native) -> HWND {
@@ -60,33 +56,22 @@ mod windows {
     /// corner and 1 px border; the panel must match it, or both show.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub enum Clip {
-        /// Windows 11 rounds the window (8 px, antialiased, clips the blur);
+        /// Windows 11 rounds the window (8 px, antialiased);
         /// its border is turned off and the panel uses the same radius.
         Dwm,
         /// No Windows rounding; a window region the shape of the 20 px panel.
         /// Exact, but the edge is aliased.
         Region,
-        /// No clipping at all: square window, square blur.
+        /// No clipping at all: a square window (the panel draws its corners).
         None,
     }
 
     /// Windows 11's corner radius for rounded windows, in logical pixels.
     pub const DWM_RADIUS: f32 = 8.0;
 
-    /// `system_backdrop`: Windows 11's own acrylic behind the window
-    /// (`DWMWA_SYSTEMBACKDROP_TYPE`), instead of gpui's `Blurred`, which uses
-    /// the undocumented `SetWindowCompositionAttribute`.
-    pub fn setup(n: Native, clip: Clip, panel_radius: f32, system_backdrop: bool) {
+    pub fn setup(n: Native, clip: Clip, panel_radius: f32) {
         let h = hwnd(n);
         unsafe {
-            if system_backdrop {
-                // The backdrop shows through the transparent parts of the
-                // frame, so extend the frame over the whole window.
-                let all = MARGINS { cxLeftWidth: -1, cxRightWidth: -1, cyTopHeight: -1, cyBottomHeight: -1 };
-                DwmExtendFrameIntoClientArea(h, &all);
-                let acrylic: i32 = DWMSBT_TRANSIENTWINDOW;
-                DwmSetWindowAttribute(h, DWMWA_SYSTEMBACKDROP_TYPE as u32, (&acrylic as *const i32).cast(), 4);
-            }
             let dark: i32 = 1;
             DwmSetWindowAttribute(h, DWMWA_USE_IMMERSIVE_DARK_MODE as u32, (&dark as *const i32).cast(), 4);
             let corner = if clip == Clip::Dwm { DWMWCP_ROUND } else { DWMWCP_DONOTROUND };
@@ -158,67 +143,6 @@ mod windows {
     }
 
     pub const CAN_PAINT_NOW: bool = true;
-
-    /// While excluded, the window doesn't appear in any screen capture (GDI,
-    /// DXGI, Windows Graphics Capture), so the matte backdrop can be captured
-    /// with the window already on screen. It's switched off again once the
-    /// backdrop is read, so screenshots of RedSnap work. Windows 10 2004+;
-    /// older versions ignore it. Call from the window's thread.
-    pub fn set_capture_excluded(n: Native, excluded: bool) {
-        let affinity = if excluded { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
-        unsafe { SetWindowDisplayAffinity(hwnd(n), affinity) };
-    }
-
-    /// The screen pixels under the window, as tightly packed BGRA rows. Call
-    /// while the window is hidden or excluded from captures. Any thread.
-    pub fn capture_behind(n: Native) -> Option<(usize, usize, Vec<u8>)> {
-        use windows_sys::Win32::Graphics::Gdi::{
-            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS,
-            DeleteDC, DeleteObject, GetDC, ReleaseDC, SRCCOPY, SelectObject,
-        };
-        unsafe {
-            let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-            GetWindowRect(hwnd(n), &mut r);
-            let (w, h) = (r.right - r.left, r.bottom - r.top);
-            if w <= 0 || h <= 0 {
-                return None;
-            }
-            let screen = GetDC(std::ptr::null_mut());
-            let dc = CreateCompatibleDC(screen);
-            let mut info: BITMAPINFO = std::mem::zeroed();
-            info.bmiHeader = BITMAPINFOHEADER {
-                biSize: size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: w,
-                biHeight: -h, // top-down
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB,
-                ..std::mem::zeroed()
-            };
-            let mut bits = std::ptr::null_mut();
-            let bmp = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, std::ptr::null_mut(), 0);
-            let mut out = None;
-            if !bmp.is_null() && !bits.is_null() {
-                let old = SelectObject(dc, bmp);
-                if BitBlt(dc, 0, 0, w, h, screen, r.left, r.top, SRCCOPY) != 0 {
-                    let len = (w * h * 4) as usize;
-                    out = Some((w as usize, h as usize, std::slice::from_raw_parts(bits as *const u8, len).to_vec()));
-                }
-                SelectObject(dc, old);
-                DeleteObject(bmp);
-            }
-            DeleteDC(dc);
-            ReleaseDC(std::ptr::null_mut(), screen);
-            out
-        }
-    }
-
-    /// The window's size in physical pixels.
-    pub fn physical_size(n: Native) -> (usize, usize) {
-        let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-        unsafe { GetWindowRect(hwnd(n), &mut r) };
-        ((r.right - r.left).max(1) as usize, (r.bottom - r.top).max(1) as usize)
-    }
 }
 
 #[cfg(target_os = "linux")]
@@ -249,7 +173,7 @@ mod linux {
         CONN.get_or_init(|| x11rb::connect(None).map_err(|e| log::warn!("x11 connect: {e}")).ok()).as_ref()
     }
 
-    pub fn setup(_: Native, _: Clip, _: f32, _: bool) {}
+    pub fn setup(_: Native, _: Clip, _: f32) {}
 
     pub fn placement_at_cursor(_: Native, size: (f32, f32)) -> Placement {
         let Some((c, screen)) = conn() else { return Placement { x: 0, y: 0 } };
@@ -292,16 +216,6 @@ mod linux {
     }
 
     pub const CAN_PAINT_NOW: bool = false;
-
-    pub fn capture_behind(_: Native) -> Option<(usize, usize, Vec<u8>)> {
-        None
-    }
-
-    pub fn set_capture_excluded(_: Native, _: bool) {}
-
-    pub fn physical_size(_: Native) -> (usize, usize) {
-        (760, 474)
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -332,7 +246,7 @@ mod macos {
         None,
     }
 
-    pub fn setup(_: Native, _: Clip, _: f32, _: bool) {}
+    pub fn setup(_: Native, _: Clip, _: f32) {}
     pub fn placement_at_cursor(_: Native, _: (f32, f32)) -> Placement {
         Placement { x: 0, y: 0 }
     }
@@ -343,14 +257,4 @@ mod macos {
     pub fn paint_now(_: Native) {}
     pub fn take_focus(_: Native) {}
     pub const CAN_PAINT_NOW: bool = false;
-
-    pub fn capture_behind(_: Native) -> Option<(usize, usize, Vec<u8>)> {
-        None
-    }
-
-    pub fn set_capture_excluded(_: Native, _: bool) {}
-
-    pub fn physical_size(_: Native) -> (usize, usize) {
-        (760, 474)
-    }
 }

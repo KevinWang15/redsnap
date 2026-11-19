@@ -176,7 +176,7 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
         launcher::bind_keys(cx);
 
         let rows = config.rows as usize;
-        let lopts = launcher::Options { rows, blur: 28., alpha: 0.8 };
+        let lopts = launcher::Options { rows };
         let bounds = Bounds { origin: point(px(0.), px(0.)), size: size(px(launcher::WIDTH), px(launcher::height(rows))) };
         let window_engine = engine(&config, catalog.clone());
         let file_events = events.clone();
@@ -276,7 +276,7 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
             // hidden. Events (the first show included) are handled after.
             if let Some(n) = native {
                 // No Windows rounding or border: the panel draws its own 20 px corners.
-                os::setup(n, os::Clip::None, 20., false);
+                os::setup(n, os::Clip::None, 20.);
                 os::hide(n);
             }
             while let Some(event) = rx.next().await {

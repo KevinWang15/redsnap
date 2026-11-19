@@ -94,7 +94,7 @@ where phase 1 must leave room for them.
 - The shortcut toggles: pressing it while the window is shown hides it.
 - Opens on the monitor under the mouse cursor, centered horizontally, about a
   quarter of the way down the work area.
-- Look: a dark translucent glass panel with a red accent, specified in
+- Look: a dark panel with a red accent, specified in
   [docs/design.md](docs/design.md).
 - Fixed size (760 × 474): query field, 5 result rows and a footer with the result
   count and key hints. More results scroll. With an empty query, the rows show the
@@ -108,7 +108,7 @@ where phase 1 must leave room for them.
 - **Enter** runs the primary action. **Cmd/Ctrl+Enter** runs the secondary action
   (for apps: show in Finder/Explorer/file manager). **Tab** or **Cmd/Ctrl+K** opens
   the action panel for the selected row; the actions are computed only when it opens.
-- Phase 1 ships the dark glass design only; a light variant comes later.
+- Phase 1 ships the dark design only; a light variant comes later.
 
 ### 3.2 Providers
 
@@ -402,16 +402,10 @@ frame). That is far too slow for every hotkey press. So:
   - Windows: `WS_POPUP`, `WS_EX_TOOLWINDOW` (no taskbar button), dark mode
     attribute.
   - macOS: borderless, Accessory activation policy, `LSUIElement`.
-- Glass (docs/design.md): the window is transparent and the panel is drawn by
-  gpui. The blur comes from the OS:
-  - macOS: gpui `Blurred` (native window blur).
-  - Windows 11: acrylic behind the window. gpui's `Blurred` fills the whole window
-    rectangle, so it must be clipped to the 20 px rounded panel. Options are DWM
-    rounded corners (only 8 px), a window region (aliased edge) or a
-    DirectComposition clip; the spike picks one. Showing the window cloaked must
-    not flash an unblurred or gray backdrop.
-  - Windows 10 and Linux without a blurring compositor: no blur, and a more opaque
-    fill.
+- Panel (docs/design.md): the window is transparent outside the panel, and gpui
+  draws the panel with its own 20 px corners and a nearly opaque fill. No blur:
+  the screen-capture matte glass was removed (a still picture doesn't follow
+  what scrolls behind the window).
 - **Spike first (M0)**: gpui 0.2.2 has no public hide/show for a window (hiding
   the raw handle with `ShowWindow(SW_HIDE/SW_SHOW)` from outside gpui is known to
   work on Windows). Confirm
@@ -760,14 +754,15 @@ Findings that shaped the app: stock gpui paints only on its vsync tick, so the
 app paints right after input; Windows sends no `WM_PAINT` to cloaked or
 off-screen windows; gpui's Windows `activate()` replays creation bounds and
 injects a fake Alt keypress (the app takes the foreground itself); the matte
-glass's screen capture costs 9–13 ms on Windows. Chinese IME input worked.
+glass's screen capture cost 9–13 ms on Windows (the matte glass was removed
+later). Chinese IME input worked.
 Still open: a macOS latency measurement (the CI bench stalled after a few
 shows).
 
 **M0 latency spike, as planned:**
 
 - A minimal app: vendored gpui 0.2.2 with patches 1–5 (§6.1), one pre-created
-  hidden search window drawn to docs/design.md (glass included), a global
+  hidden search window drawn to docs/design.md, a global
   hotkey, a query field, and 5 result rows with icons filtered from a fixture list
   of 2,000 names.
 - Timeline logging to `perf.jsonl`: hotkey received, show requested, first frame

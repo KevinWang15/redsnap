@@ -37,9 +37,9 @@ impl Render for Launcher {
         let count = self.hits.len();
         let list: Vec<AnyElement> =
             (self.top..(self.top + rows).min(count)).map(|i| self.row(i, i == self.selected, i - self.top, cx)).collect();
-        // With a fill under the glass of `alpha`; opaque when there's no
-        // picture of the screen (capture failed or isn't available).
-        let alpha = if self.backdrop.is_some() { self.opts.alpha } else { 0.97 };
+        // The panel's fill: nearly opaque, so only a hint of what's behind
+        // the window shows, live.
+        let alpha = 0.97;
         let radius = px(RADIUS);
         let layer = || div().absolute().top_0().left_0().size_full().rounded(radius);
 
@@ -183,10 +183,6 @@ impl Render for Launcher {
             .relative()
             .size_full()
             .rounded(radius)
-            // Matte glass: the blurred screen, then the dark fill over it.
-            .when_some(self.backdrop.clone(), |d, image| {
-                d.child(layer().child(img(image).size_full().rounded(radius).object_fit(ObjectFit::Fill)))
-            })
             .child(layer().bg(linear_gradient(
                 180.,
                 linear_color_stop(with_alpha(0x10181E, alpha), 0.),

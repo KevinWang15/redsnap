@@ -6,33 +6,19 @@ about 1.25× scale, so measurements from it are divided by 1.25.
 
 ## Panel
 
-- Matte glass, picked 2026-11-19 from three variants: the desktop under the window,
-  blurred about 28 px, shows through a dark fill.
-- Fill: a vertical gradient from `rgba(16, 24, 30, 0.80)` at the top to
-  `rgba(22, 18, 34, 0.84)` at the bottom (slightly teal → slightly violet).
-- The OS blurs are not used. Windows acrylic blurs too strongly to show anything
-  and can't be tuned. Instead, RedSnap captures the screen under its window and
-  blurs that itself (quarter resolution, three box passes).
-- The capture takes 9–13 ms on Windows (GDI waits for composition). By default
-  the window waits for it and opens finished, so hotkey to frame is about
-  12–17 ms instead of about 2 ms.
-- Optional (a setting, not built yet): show at once with
-  an opaque fill while excluded from captures (`WDA_EXCLUDEFROMCAPTURE`), capture
-  in the background, then fade the fill to 0.8 over 100 ms. It opens faster but
-  the fade reads as a background flash, so it is off by default. The exclusion
-  is lifted after the capture, so screenshots of RedSnap still work. The window is fully transparent outside the panel, so the panel's
-  own 20 px corners are the window's corners.
+- A nearly opaque dark fill: a vertical gradient from `rgba(16, 24, 30, 0.97)`
+  at the top to `rgba(22, 18, 34, 1.0)` at the bottom (slightly teal →
+  slightly violet).
+- No blurred backdrop (removed 2026-11-19). The matte glass was a screen
+  capture blurred by RedSnap, and a still picture stays put when what's
+  behind the window scrolls. A blur would have to be the compositor's own,
+  live one.
+- The window is fully transparent outside the panel, so the panel's own 20 px
+  corners are the window's corners. Windows' own corner rounding and border
+  are off.
 - Border: 1 px `rgba(255, 255, 255, 0.10)`. Corner radius 20.
 - A soft drop shadow outside the panel, if the OS draws one for the window.
 - Padding: 16 around the content.
-- Backdrop per OS:
-  - Windows: the matte glass above (screen capture + our blur), Windows 10 and
-    11 alike. Windows' own corner rounding and border are off.
-  - macOS: reading the screen needs the Screen Recording permission, which a
-    launcher shouldn't ask for. Use the native window blur with its radius
-    tuned to match instead.
-  - Linux: X11 capture works without a permission; Wayland doesn't allow it, so
-    fall back to the fill alone, raised to 0.94.
 
 ## Search row
 

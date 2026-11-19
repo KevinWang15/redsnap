@@ -29,7 +29,7 @@ Read first: `PLAN.md` (architecture, §5 implementation rules), `docs/design.md`
 | Path | What |
 |---|---|
 | `crates/core` | Search engine, ranking, calculator, config, usage store, clipboard store and search. No OS code; fully tested anywhere. |
-| `crates/platform` | Every OS call: `window.rs` (show/hide/place/capture), `apps/` (discovery + icons per OS), `clipboard/` (capture/write/paste), `autostart.rs`, `instance.rs` (single instance), `settings_ipc.rs`, `open.rs` (launch, open, system commands), `tray.rs`. |
+| `crates/platform` | Every OS call: `window.rs` (show/hide/place/paint), `apps/` (discovery + icons per OS), `clipboard/` (capture/write/paste), `autostart.rs`, `instance.rs` (single instance), `settings_ipc.rs`, `open.rs` (launch, open, system commands), `tray.rs`. |
 | `crates/app` | The `redsnap` binary: gpui search window (`launcher/`), event loop (`app.rs`), shortcuts (`hotkeys.rs`), settings host (`settings.rs`), icons. |
 | `settings-ui/` | Settings UI: Vite + React + TypeScript + Tailwind. |
 | `crates/settings-host` | `redsnap-settings`: shows settings-ui in the system webview (wry: WebView2 / WKWebView / WebKitGTK). |
@@ -91,7 +91,6 @@ MetalToolchain` if `xcrun metal` is missing).
 | Search window show/hide | done, tested | gpui app-level (`cx.activate`, `cx.hide()`); never run on a Mac | X11 map/unmap via x11rb, tested on Xvfb; **Wayland: never shows** |
 | Window placement | monitor under cursor, DPI-aware | not implemented (gpui default position) | screen 0, scale 1.0 |
 | Paint right after input | done | no | no |
-| Matte glass (blurred screen behind) | done (GDI capture) | no capture: opaque fill | no capture: opaque fill |
 | Global shortcuts | done | `global-hotkey` (Carbon); untested | `global-hotkey` (X11 XGrabKey); tested on Xvfb; none on Wayland |
 | Tray | done | `tray-icon`; untested | `ksni` (StatusNotifierItem); no tray on GNOME without the AppIndicator extension |
 | App discovery | AppsFolder, tested | `.app` bundles + Finder names; untested on a real Mac | `.desktop` files, tested |
@@ -131,12 +130,7 @@ MetalToolchain` if `xcrun metal` is missing).
    NSActivityUserInitiatedAllowingIdleSystemSleep` while running, or
    confirm Carbon hotkey events wake it promptly). Measure hotkey→frame after
    the app has been hidden for a few minutes.
-5. **Matte glass:** don't capture the screen on macOS (it needs the Screen
-   Recording permission, which a launcher shouldn't ask for). Use gpui's
-   `WindowBackgroundAppearance::Blurred` (native window blur) with the panel
-   fill at 0.8, and tune the blur radius if gpui exposes it (a patch may be
-   needed). Corners: the panel's own 20 px radius over a transparent window.
-6. **Clipboard capture** (`platform/src/clipboard/`, new `macos.rs`), per
+5. **Clipboard capture** (`platform/src/clipboard/`, new `macos.rs`), per
    `docs/clipboard.md`:
    - Poll `NSPasteboard.generalPasteboard.changeCount` every 150 ms on a
      background thread. If it advanced by more than one between polls,
@@ -153,28 +147,28 @@ MetalToolchain` if `xcrun metal` is missing).
      `com.kevinwang15.redsnap.write` holding the entry id) and report them
      as `ClipEventKind::OwnWrite`, like Windows does.
    - `Watcher::write` writes the entry back; keep the `Watcher` API as is.
-7. **Paste into the previous app:** record the frontmost app at show
+6. **Paste into the previous app:** record the frontmost app at show
    (`clipboard::foreground()` returns a `Target`), activate it after hiding,
    then send Cmd+V with `CGEventCreateKeyboardEvent` + `CGEventPost`. This
    needs the Accessibility permission: detect it
    (`AXIsProcessTrustedWithOptions`), and without it make Enter copy only and
    say so in the footer (the clipboard view's footer, `launcher/view.rs`).
-8. **App icons through the system:** replace the `.icns` reader with
+7. **App icons through the system:** replace the `.icns` reader with
    `NSWorkspace.iconForFile:` rendered to a bitmap (straight-alpha BGRA, as
    `apps::icon` returns elsewhere), so apps whose icon is only in
    `Assets.car` get their real icon. Keep it off the UI thread.
-9. **Check app discovery and launching:** localized names (set the system to
+8. **Check app discovery and launching:** localized names (set the system to
    Chinese and check 微信, 网易云音乐 etc. appear by name and by pinyin),
    apps in `/Applications/Utilities` and `~/Applications`, launching with
    Enter, "Show in Finder" with Cmd+Enter.
-10. **Measure latency** with `--perf` (hotkey → presented frame, keystroke →
+9. **Measure latency** with `--perf` (hotkey → presented frame, keystroke →
     presented frame) on a real Mac, warm and after App Nap, and add the
     numbers to `PLAN.md` §7.
-11. **Start at login and the tray:** check the LaunchAgent works across a
+10. **Start at login and the tray:** check the LaunchAgent works across a
     log out / log in, and the menu bar icon's menu (it uses a template image;
     check it reads in light and dark menu bars).
 
-12. **Snippets** (docs/snippets.md): implement `redsnap_platform::snippets`
+11. **Snippets** (docs/snippets.md): implement `redsnap_platform::snippets`
     for macOS. Inserting: activate the previous app, then type with
     `CGEventKeyboardSetUnicodeString` events (or paste for long text).
     Expansion as you type: a `CGEventTap` on key-down events (needs the
@@ -184,7 +178,7 @@ MetalToolchain` if `xcrun metal` is missing).
     input fields (`IsSecureEventInputEnabled`). Reuse
     `redsnap_core::snippets::{Typed, Triggers, render}` as Windows does.
 
-13. **File search** (docs/files.md): run `cargo run -p redsnap-platform
+12. **File search** (docs/files.md): run `cargo run -p redsnap-platform
     --example find_files -- <words>` and check that `mdfind` answers within a
     few hundred ms. Check that names with accents and CJK characters match,
     and that `.app` bundles open as apps. Also check that `f` in the launcher
@@ -220,29 +214,24 @@ MetalToolchain` if `xcrun metal` is missing).
 5. **Paste into the previous app:** X11: remember the focused window at show
    (`_NET_ACTIVE_WINDOW`), activate it after hiding, send Ctrl+V with XTEST.
    Wayland: generally not possible; Enter copies only, and the footer says so.
-6. **Matte glass:** X11 capture of the root window region under the window
-   (before showing) works without permissions, but needs a compositor for the
-   transparency to look right; without one, keep the opaque fill. Wayland:
-   no capture; use the compositor blur where offered (KDE
-   `org_kde_kwin_blur`) or the opaque fill.
-7. **Tray on GNOME:** without the AppIndicator extension there's no tray.
+6. **Tray on GNOME:** without the AppIndicator extension there's no tray.
    Make sure RedSnap stays usable (it does: hotkey and `redsnap settings`) and
    mention it in the first-run notice.
-8. **Check launching** `.desktop` apps on GNOME and KDE (`gtk-launch` may be
+7. **Check launching** `.desktop` apps on GNOME and KDE (`gtk-launch` may be
    missing; `gio launch` is the fallback; a direct `Exec=` spawn with field
    codes stripped is the last resort), Flatpak and Snap apps, and
    "Show in folder".
-9. **Measure latency** on a real X11 desktop with a GPU, and on Wayland once
+8. **Measure latency** on a real X11 desktop with a GPU, and on Wayland once
    it shows.
 
-10. **Snippets** (docs/snippets.md): on X11, inserting via XTEST (activate
+9. **Snippets** (docs/snippets.md): on X11, inserting via XTEST (activate
     the previous window first) and expansion as you type via the XRecord
     extension (or XInput2 raw key events), decoding with xkbcommon. Wayland
     gives apps no global key access; expansion is unavailable there (say so
     in Settings → Snippets), inserting may work through the portal
     RemoteDesktop/virtual keyboard where offered.
 
-11. **File search** (docs/files.md): install plocate on a real desktop, run
+10. **File search** (docs/files.md): install plocate on a real desktop, run
     `sudo updatedb`, and check `f` in the launcher and the `find_files`
     example. Check the "needs plocate" and "index isn't built" rows on a
     machine without it.

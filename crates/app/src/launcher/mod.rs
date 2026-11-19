@@ -1,7 +1,6 @@
 //! The search window: one pre-created window for the life of the process,
 //! shown and hidden with OS calls (PLAN.md §5.1), drawn to docs/design.md.
 
-mod backdrop;
 pub mod clip;
 pub mod query_field;
 mod view;
@@ -10,7 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
-    AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable, KeyBinding, RenderImage, Window, WindowHandle,
+    AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable, KeyBinding, Window, WindowHandle,
     actions,
 };
 use redsnap_core::files::{FileRequest, FileResults, Files};
@@ -73,10 +72,6 @@ pub fn bind_keys(cx: &mut gpui::App) {
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
     pub rows: usize,
-    /// Blur radius of the matte glass, in physical pixels.
-    pub blur: f32,
-    /// Opacity of the panel's fill over the blurred screen.
-    pub alpha: f32,
 }
 
 /// The action panel (Tab): what can be done with the selected result.
@@ -116,9 +111,6 @@ pub struct Launcher {
     /// Whether the window has been active since it was last shown.
     had_focus: bool,
     opts: Options,
-    backdrop: Option<Arc<RenderImage>>,
-    /// Taken off screen on hide; its texture is freed on the next show.
-    stale_backdrop: Option<Arc<RenderImage>>,
     _subs: Vec<gpui::Subscription>,
 }
 
@@ -172,8 +164,6 @@ impl Launcher {
             paste_target: None,
             had_focus: false,
             opts,
-            backdrop: None,
-            stale_backdrop: None,
             _subs: subs,
         };
         this.refresh();
@@ -314,12 +304,6 @@ impl Launcher {
         cx.notify();
     }
 
-    fn set_backdrop(&mut self, image: Option<Arc<RenderImage>>, window: &mut Window, cx: &mut Context<Self>) {
-        for old in [std::mem::replace(&mut self.backdrop, image), self.stale_backdrop.take()].into_iter().flatten() {
-            window.drop_image(old).ok();
-        }
-        cx.notify();
-    }
 
     pub fn hide(&mut self, cx: &mut Context<Self>) {
         if !self.visible {
@@ -330,7 +314,6 @@ impl Launcher {
         self.had_focus = false;
         self.panel = None;
         self.confirming = None;
-        self.stale_backdrop = self.backdrop.take();
         let native = self.native;
         cx.spawn(async move |_, cx| {
             if cfg!(target_os = "macos") {
@@ -525,8 +508,7 @@ impl Focusable for Launcher {
 }
 
 /// Shows the window, finished: reset to the default list, place it on the
-/// monitor under the cursor, capture and blur the screen under it (it's
-/// still hidden, so not in the picture), paint while cloaked, reveal, focus.
+/// monitor under the cursor, paint while cloaked, reveal, focus.
 /// Runs as a task so no OS call happens inside a gpui update.
 pub async fn show(handle: WindowHandle<Launcher>, started: Instant, clipboard: bool, cx: &mut AsyncApp) {
     perf::show_started(started);
@@ -547,10 +529,6 @@ pub async fn show(handle: WindowHandle<Launcher>, started: Instant, clipboard: b
     let Some(n) = native else { return };
     log::debug!("show");
     os::place(n, os::placement_at_cursor(n, (WIDTH, height(opts.rows))));
-    let t = Instant::now();
-    let image = os::capture_behind(n).map(|(w, h, bgra)| backdrop::blur(w, h, &bgra, opts.blur));
-    perf::record("backdrop_capture_blur", t.elapsed().as_secs_f64() * 1000.0);
-    handle.update(cx, |launcher, window, cx| launcher.set_backdrop(image, window, cx)).ok();
     os::set_cloaked(n, true);
     os::show(n);
     os::paint_now(n);
