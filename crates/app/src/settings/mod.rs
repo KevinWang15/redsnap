@@ -12,7 +12,7 @@ mod widgets;
 
 use anyhow::Result;
 use futures::channel::oneshot;
-use gpui::{App, AppContext, AsyncApp, Bounds, Point, TitlebarOptions, WindowBounds, WindowHandle, WindowKind, WindowOptions, px, size};
+use gpui::{App, AppContext, AsyncApp, Bounds, Point, TitlebarOptions, WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind, WindowOptions, px, size};
 use serde_json::Value;
 
 use crate::app::{Event, Events};
@@ -65,6 +65,13 @@ impl SettingsHost {
                     is_movable: true,
                     is_resizable: true,
                     is_minimizable: true,
+                    // The OS blurs what's behind it where it can (as the search
+                    // window); the theme's surfaces are translucent then.
+                    window_background: if redsnap_platform::window::LOOK.blur {
+                        WindowBackgroundAppearance::Blurred
+                    } else {
+                        WindowBackgroundAppearance::Opaque
+                    },
                     app_id: Some("redsnap".into()),
                     window_min_size: Some(size(px(720.), px(480.))),
                     ..Default::default()

@@ -652,6 +652,8 @@ impl Render for SettingsView {
         } else {
             let page = super::pages::render(self, window, cx);
             AppShell::new("page")
+                // The window's own fill is under it already.
+                .bg(gpui::transparent_black())
                 .sidebar(self.sidebar(cx))
                 .child(div().w_full().flex().justify_center().px(px(32.)).py(px(28.)).child(div().w_full().max_w(px(760.)).flex().flex_col().gap(px(28.)).child(page)))
                 .into_any_element()
@@ -682,6 +684,22 @@ fn centered(text: String, cx: &App) -> AnyElement {
 }
 
 /// The dark theme with RedSnap's red, for the settings window.
+/// The dark theme with RedSnap's red, for the settings window. Where the OS
+/// blurs what's behind the window (`window::LOOK`), the surfaces are
+/// translucent so the blur shows, like the search window's matte glass; text
+/// fields, menus and tooltips stay nearly opaque so they read well.
 pub fn theme() -> Theme {
-    Theme::dark().with_accent(rgb(RED).into())
+    let mut t = Theme::dark().with_accent(rgb(RED).into());
+    if redsnap_platform::window::LOOK.blur {
+        let tint = |c: u32, a: f32| gpui::Hsla::from(rgb(c)).opacity(a);
+        // Layered: the window's fill, then the sidebar and cards over it.
+        t.background = tint(0x0E1219, 0.55);
+        t.sidebar_bg = tint(0x0A0D13, 0.35);
+        t.surface = tint(0x161B25, 0.45);
+        t.input_bg = tint(0x0B0F16, 0.9);
+        t.secondary = tint(0x1E2430, 0.85);
+        t.border = gpui::white().opacity(0.08);
+        t.sidebar_border = gpui::white().opacity(0.06);
+    }
+    t
 }
