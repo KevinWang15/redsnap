@@ -14,6 +14,7 @@
 
 mod app;
 mod execute;
+mod icons;
 mod launcher;
 mod perf;
 

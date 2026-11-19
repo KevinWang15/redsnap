@@ -210,7 +210,7 @@ impl Launcher {
                     }])
             })
             .on_click(cx.listener(move |this, _, _, cx| this.run_row(slot, cx)))
-            .child(icon(item))
+            .child(icon(item, cx))
             .child(
                 div()
                     .flex_1()
@@ -232,9 +232,14 @@ impl Launcher {
     }
 }
 
-/// A 38 px tile: the app's icon once icons are loaded (M3); until then a
-/// colored tile with a glyph or the first letter.
-fn icon(item: &Item) -> impl IntoElement {
+/// A 38 px tile: the app's own icon once loaded; until then (or without
+/// one) a colored tile with the first letter. Built-in results get a glyph.
+fn icon(item: &Item, cx: &gpui::App) -> AnyElement {
+    if let (IconRef::App(id), Action::Launch(target)) = (&item.icon, &item.primary)
+        && let Some(image) = crate::icons::get(cx, id, target)
+    {
+        return img(image).size(px(38.)).flex_none().object_fit(ObjectFit::Contain).into_any_element();
+    }
     let (glyph, color): (String, u32) = match &item.icon {
         IconRef::Builtin(name) => {
             let g = match *name {
@@ -268,6 +273,7 @@ fn icon(item: &Item) -> impl IntoElement {
         .font_weight(gpui::FontWeight::SEMIBOLD)
         .text_color(white(0.95))
         .child(glyph)
+        .into_any_element()
 }
 
 fn action_panel(panel: &ActionPanel) -> impl IntoElement {

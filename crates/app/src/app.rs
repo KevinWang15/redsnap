@@ -11,11 +11,12 @@ use futures::channel::mpsc::UnboundedSender;
 use global_hotkey::hotkey::HotKey;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use gpui::{
-    App, AppContext, Application, Bounds, WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind,
+    App, AppContext, Application, Bounds, RenderImage, WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind,
     WindowOptions, point, px, size,
 };
 use redsnap_core::config::{self, Config};
-use redsnap_core::providers::apps::{AppCatalog, AppsProvider};
+use redsnap_core::item::{Action, ItemId};
+use redsnap_core::providers::apps::{AppCatalog, AppEntry, AppsProvider};
 use redsnap_core::providers::{CalculatorProvider, CommandsProvider, OpenProvider, QuickLinksProvider, WebSearchProvider};
 use redsnap_core::query::{Keywords, Target};
 use redsnap_core::search::{Engine, Provider};
@@ -33,7 +34,19 @@ pub enum Event {
     Hotkey(Instant),
     Cli(CliCommand),
     Tray(TrayCommand),
+    /// Scan installed apps again (startup, "Reload Apps", a stale catalog).
+    Rescan,
+    Scanned(Vec<AppEntry>),
+    Icon(ItemId, Option<Arc<RenderImage>>),
 }
+
+/// A rescan is due on show when the catalog is older than this.
+const STALE: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// Lets code without the channel (actions) send app events.
+pub struct Events(pub UnboundedSender<Event>);
+
+impl gpui::Global for Events {}
 
 pub struct Options {
     /// Start hidden (start at login uses this).
@@ -78,11 +91,9 @@ fn engine(config: &Config, catalog: Arc<ArcSwap<AppCatalog>>) -> Engine {
     Engine::new(providers, keywords)
 }
 
-/// Rescans installed apps. App discovery arrives in M3; until then the
-/// catalog stays empty.
+/// Asks for a rescan of installed apps.
 pub fn reload_apps(cx: &mut App) {
-    let apps = cx.global::<Catalog>().0.load().len();
-    log::info!("app discovery isn't implemented yet (M3); {apps} apps in the catalog");
+    let _ = cx.global::<Events>().0.unbounded_send(Event::Rescan);
 }
 
 pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: futures::channel::mpsc::UnboundedReceiver<Event>) -> Result<()> {
@@ -99,6 +110,15 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
         cx.set_global(Shell { paths: paths.clone() });
         let catalog = Arc::new(ArcSwap::from_pointee(AppCatalog::empty()));
         cx.set_global(Catalog(catalog.clone()));
+        cx.set_global(Events(events.clone()));
+        let icon_events = events.clone();
+        cx.set_global(crate::icons::Icons::start(paths.cache.join("icons"), move |id, icon| {
+            let _ = icon_events.unbounded_send(Event::Icon(id, icon));
+        }));
+        let _ = events.unbounded_send(Event::Rescan);
+        let scan_config = config.clone();
+        let mut last_scan: Option<Instant> = None;
+        let mut scanning = false;
         crate::launcher::query_field::bind_keys(cx);
         launcher::bind_keys(cx);
 
@@ -178,6 +198,7 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
             let _ = events.unbounded_send(Event::Cli(CliCommand::Show));
         }
 
+        let events_loop = events.clone();
         cx.spawn(async move |cx| {
             // First, outside any update: style the window and make sure it's
             // hidden. Events (the first show included) are handled after.
@@ -191,6 +212,9 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
                     Event::Hotkey(_) => "hotkey".to_string(),
                     Event::Cli(c) => format!("cli {c:?}"),
                     Event::Tray(t) => format!("tray {t:?}"),
+                    Event::Rescan => "rescan".into(),
+                    Event::Scanned(a) => format!("scanned {} apps", a.len()),
+                    Event::Icon(id, _) => format!("icon {}", id.as_str()),
                 });
                 let visible = handle.update(cx, |l, _, _| l.visible).unwrap_or(false);
                 match event {
@@ -198,14 +222,54 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
                     Event::Hotkey(_) | Event::Cli(CliCommand::Toggle) if visible => {
                         handle.update(cx, |l, _, cx| l.hide(cx)).ok();
                     }
-                    Event::Hotkey(at) => launcher::show(handle, at, cx).await,
+                    Event::Hotkey(at) => {
+                        if last_scan.is_some_and(|t| t.elapsed() > STALE) && !scanning {
+                            let _ = events_loop.unbounded_send(Event::Rescan);
+                        }
+                        launcher::show(handle, at, cx).await
+                    }
+                    Event::Rescan if scanning => {}
+                    Event::Rescan => {
+                        scanning = true;
+                        let extra = scan_config.extra_app_folders.clone();
+                        let tx = events_loop.clone();
+                        cx.background_executor()
+                            .spawn(async move {
+                                let apps = redsnap_platform::apps::scan(&extra).unwrap_or_else(|e| {
+                                    log::warn!("scanning apps: {e:#}");
+                                    Vec::new()
+                                });
+                                let _ = tx.unbounded_send(Event::Scanned(apps));
+                            })
+                            .detach();
+                    }
+                    Event::Scanned(apps) => {
+                        scanning = false;
+                        last_scan = Some(Instant::now());
+                        let warm: Vec<(ItemId, redsnap_core::item::LaunchTarget)> =
+                            apps.iter().map(|a| (ItemId::new("app", &a.key), a.launch.clone())).collect();
+                        let built = AppCatalog::build(apps, &scan_config.app_aliases, &scan_config.hidden_apps);
+                        log::info!("{} apps in the catalog", built.len());
+                        cx.update(|cx| {
+                            cx.global::<Catalog>().0.store(Arc::new(built));
+                            cx.global::<crate::icons::Icons>().warm(warm);
+                        })
+                        .ok();
+                        handle.update(cx, |l, _, cx| l.apps_changed(cx)).ok();
+                    }
+                    Event::Icon(id, icon) => {
+                        cx.update(|cx| cx.global::<crate::icons::Icons>().finished(id, icon)).ok();
+                        if visible {
+                            handle.update(cx, |_, _, cx| cx.notify()).ok();
+                        }
+                    }
                     Event::Cli(CliCommand::Toggle | CliCommand::Show) | Event::Tray(TrayCommand::Open) => {
                         if !visible {
                             launcher::show(handle, Instant::now(), cx).await;
                         }
                     }
                     Event::Cli(CliCommand::Settings) | Event::Tray(TrayCommand::Settings) => {
-                        cx.update(|cx| crate::execute::run(redsnap_core::item::Action::RedSnap(redsnap_core::item::InternalCommand::OpenSettings), cx)).ok();
+                        cx.update(|cx| crate::execute::run(Action::RedSnap(redsnap_core::item::InternalCommand::OpenSettings), cx)).ok();
                     }
                     Event::Tray(TrayCommand::ToggleStartAtLogin) => {
                         let on = !autostart::is_enabled();

@@ -147,6 +147,12 @@ impl Launcher {
         this
     }
 
+    /// A rescan replaced the app catalog: search again, keeping the selection.
+    pub fn apps_changed(&mut self, cx: &mut Context<Self>) {
+        self.refresh();
+        cx.notify();
+    }
+
     pub fn set_notice(&mut self, notice: Option<String>, cx: &mut Context<Self>) {
         self.notice = notice;
         cx.notify();
