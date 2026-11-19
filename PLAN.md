@@ -77,7 +77,7 @@ Non-goals for now (each one was expensive and gave little value before):
 | Phase | Theme | Contents |
 |---|---|---|
 | **1** | Core launcher | Search window, app search + launch on all three OSes, calculator, web searches and quick links, open URL/path, RedSnap and system commands, action panel, learned ranking, tray, hotkey, start at login, single instance, Electron settings. Then clipboard history (native view, it needs the same instant search) with paste into the previous app ([docs/clipboard.md](docs/clipboard.md)). |
-| 2 | Snippets and files | Snippets with text expansion, file search (Everything on Windows, Spotlight on macOS, plocate/fd on Linux), folder browsing. |
+| 2 | Snippets and files | Snippets with text expansion ([docs/snippets.md](docs/snippets.md)), file search (Everything on Windows, Spotlight on macOS, plocate on Linux) and folder browsing ([docs/files.md](docs/files.md)). |
 | 3 | Extensions | Plugin protocol (JSON-RPC over stdio, long-lived process option), window switcher, per-plugin hotkeys, plugin management pages in Electron. |
 
 Phase 1 is the subject of the rest of this document. Phases 2 and 3 appear only

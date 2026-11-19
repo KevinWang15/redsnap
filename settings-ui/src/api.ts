@@ -9,6 +9,7 @@ export type Providers = {
   open: boolean
   commands: boolean
   systemCommands: boolean
+  files: boolean
 }
 
 export type WebSearch = { id: string; name: string; keyword: string; url: string }

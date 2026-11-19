@@ -11,6 +11,8 @@ pub enum Target {
     QuickLink(String),
     /// `sn …`: snippets only.
     Snippets,
+    /// `f …`: the OS's file index.
+    Files,
 }
 
 /// Keywords from the config, looked up by their folded form.

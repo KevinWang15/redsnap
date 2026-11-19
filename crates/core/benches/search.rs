@@ -39,7 +39,7 @@ fn main() {
     let mut engine = Engine::new(
         vec![
             Box::new(CalculatorProvider),
-            Box::new(OpenProvider { home: None }),
+            Box::new(OpenProvider),
             Box::new(AppsProvider::new(Arc::new(ArcSwap::from_pointee(catalog)))),
             Box::new(CommandsProvider::new(&[])),
             Box::new(WebSearchProvider::new(config.web_searches)),

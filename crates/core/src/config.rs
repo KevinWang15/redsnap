@@ -123,6 +123,14 @@ pub struct Providers {
     pub open: bool,
     pub commands: bool,
     pub system_commands: bool,
+    /// `f …` searches the OS's file index (Everything, Spotlight, plocate).
+    /// Optional in the file: added after the first release of this format.
+    #[serde(default = "yes")]
+    pub files: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -170,6 +178,7 @@ impl Default for Config {
                 open: true,
                 commands: true,
                 system_commands: true,
+                files: true,
             },
             web_searches: vec![
                 search("google", "Google", "g", "https://www.google.com/search?q={query}"),

@@ -13,6 +13,7 @@ pub mod icon {
     pub const CALCULATOR: &str = "icons/calculator.svg";
     pub const CORNER_DOWN_LEFT: &str = "icons/corner-down-left.svg";
     pub const EXTERNAL_LINK: &str = "icons/external-link.svg";
+    pub const FILE: &str = "icons/file.svg";
     pub const FILES: &str = "icons/files.svg";
     pub const FOLDER: &str = "icons/folder.svg";
     pub const IMAGE: &str = "icons/image.svg";
@@ -36,6 +37,7 @@ const FILES: &[(&str, &[u8])] = &[
     ("icons/calculator.svg", include_bytes!("../assets/icons/calculator.svg")),
     ("icons/corner-down-left.svg", include_bytes!("../assets/icons/corner-down-left.svg")),
     ("icons/external-link.svg", include_bytes!("../assets/icons/external-link.svg")),
+    ("icons/file.svg", include_bytes!("../assets/icons/file.svg")),
     ("icons/files.svg", include_bytes!("../assets/icons/files.svg")),
     ("icons/folder.svg", include_bytes!("../assets/icons/folder.svg")),
     ("icons/image.svg", include_bytes!("../assets/icons/image.svg")),

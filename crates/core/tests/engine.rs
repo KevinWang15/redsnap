@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use redsnap_core::config::Config;
+use redsnap_core::files::{Files, FilesProvider};
 use redsnap_core::item::{Action, LaunchTarget, SystemCommand};
 use redsnap_core::providers::apps::{AppCatalog, AppEntry, AppsProvider};
 use redsnap_core::providers::{
@@ -47,7 +48,8 @@ fn engine() -> Engine {
     Engine::new(
         vec![
             Box::new(CalculatorProvider),
-            Box::new(OpenProvider { home: Some("/home/me".into()) }),
+            Box::new(OpenProvider),
+            Box::new(FilesProvider(Arc::new(Files::new(true, true, "Index", "", Some("/home/me".into()))))),
             Box::new(AppsProvider::new(catalog)),
             Box::new(CommandsProvider::new(&[SystemCommand::Lock, SystemCommand::Restart])),
             Box::new(QuickLinksProvider::new(Vec::new())),

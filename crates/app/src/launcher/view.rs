@@ -115,6 +115,11 @@ impl Render for Launcher {
             }
             None => format!("{count} result{}", if count == 1 { "" } else { "s" }).into(),
         };
+        let enter_label: &'static str = if in_clip {
+            "Paste"
+        } else {
+            self.hits.get(self.selected).map(|h| h.item.primary.label()).filter(|l| !l.is_empty()).unwrap_or("Open")
+        };
         let copy_key: &'static str = if cfg!(target_os = "macos") { "⌘C" } else { "Ctrl C" };
         let footer = div()
             .mt_auto()
@@ -132,7 +137,7 @@ impl Render for Launcher {
             .child(div().flex_1())
             .child(key_hint(Cap::Icon(crate::assets::icon::ARROW_UP_DOWN), "Navigate"))
             .child(div().w(px(16.)))
-            .child(key_hint(Cap::Icon(crate::assets::icon::CORNER_DOWN_LEFT), if in_clip { "Paste" } else { "Open" }))
+            .child(key_hint(Cap::Icon(crate::assets::icon::CORNER_DOWN_LEFT), enter_label))
             .child(div().w(px(16.)))
             .when(in_clip, |d| d.child(key_hint(Cap::Text(copy_key), "Copy")).child(div().w(px(16.))))
             .child(key_hint(Cap::Icon(crate::assets::icon::ARROW_RIGHT_TO_LINE), "Actions"));
@@ -262,6 +267,7 @@ fn icon(item: &Item, cx: &gpui::App) -> AnyElement {
             let path = match *name {
                 "calculator" => i::CALCULATOR,
                 "folder" => i::FOLDER,
+                "file" => i::FILE,
                 "link" => i::EXTERNAL_LINK,
                 "search" => i::SEARCH,
                 "gear" => i::SETTINGS,
@@ -287,12 +293,21 @@ fn icon(item: &Item, cx: &gpui::App) -> AnyElement {
     }
 }
 
+/// The file or folder a result is about, if any.
+pub(super) fn panel_path(item: &Item) -> Option<&std::path::Path> {
+    [Some(&item.primary), item.secondary.as_ref()].into_iter().flatten().find_map(|a| match a {
+        Action::OpenPath(p) | Action::RevealPath(p) => Some(p.as_path()),
+        _ => None,
+    })
+}
+
 fn action_panel(panel: &ActionPanel) -> impl IntoElement {
     let labels = panel
         .actions
         .iter()
         .map(|a| match a {
             Action::CopyText(t) if *t == panel.item.title => "Copy name".to_string(),
+            Action::CopyText(t) if panel_path(&panel.item).is_some_and(|p| p.display().to_string() == *t) => "Copy path".to_string(),
             a => a.label().to_string(),
         })
         .collect();

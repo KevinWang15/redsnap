@@ -105,6 +105,16 @@ impl QueryField {
         }
     }
 
+    /// Replaces the text, with the caret at the end.
+    pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.content = text.to_string();
+        self.selected = text.len()..text.len();
+        self.reversed = false;
+        self.marked = None;
+        cx.notify();
+        cx.emit(QueryChanged);
+    }
+
     // Offsets also arrive from the OS (IME queries) and from the last layout,
     // which can be a frame behind the content. Every one is clamped to the
     // content and to a character boundary before use.

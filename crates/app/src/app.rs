@@ -15,6 +15,7 @@ use gpui::{
     WindowKind, WindowOptions, point, px, size,
 };
 use redsnap_core::config::{self, Config};
+use redsnap_core::files::{Files, FilesProvider};
 use redsnap_core::item::{Action, ItemId};
 use redsnap_core::providers::apps::{AppCatalog, AppEntry, AppsProvider};
 use redsnap_core::providers::{
@@ -28,7 +29,7 @@ use redsnap_platform::instance::CliCommand;
 use redsnap_platform::paths::Paths;
 use redsnap_platform::settings_ipc::Reply;
 use redsnap_platform::tray::{Tray, TrayCommand};
-use redsnap_platform::{autostart, open, window as os};
+use redsnap_platform::{autostart, files, open, window as os};
 use serde_json::{Value, json};
 
 use crate::execute::Shell;
@@ -56,6 +57,8 @@ pub enum Event {
     SettingsClosed,
     /// Type a snippet into the window that was in front.
     InsertSnippet(String, Option<redsnap_platform::clipboard::Target>),
+    /// The file index or a folder listing answered.
+    Files(redsnap_core::files::FileResults),
 }
 
 /// A rescan is due on show when the catalog is older than this.
@@ -71,14 +74,21 @@ pub struct Options {
     pub background: bool,
 }
 
-fn engine(config: &Config, catalog: Arc<ArcSwap<AppCatalog>>) -> Engine {
+/// The search engine for `config`, and the file search state it shares
+/// with the launcher.
+fn engine(config: &Config, catalog: Arc<ArcSwap<AppCatalog>>) -> (Engine, Arc<Files>) {
     let p = &config.providers;
     let mut providers: Vec<Box<dyn Provider>> = Vec::new();
     if p.calculator {
         providers.push(Box::new(CalculatorProvider));
     }
     if p.open {
-        providers.push(Box::new(OpenProvider { home: dirs::home_dir() }));
+        providers.push(Box::new(OpenProvider));
+    }
+    // `f …` searches the index; typed paths (part of "open") list folders.
+    let files = Arc::new(Files::new(p.files, p.open, files::BACKEND, files::SYNTAX, dirs::home_dir()));
+    if p.files || p.open {
+        providers.push(Box::new(FilesProvider(files.clone())));
     }
     if p.apps {
         providers.push(Box::new(AppsProvider::new(catalog)));
@@ -104,9 +114,10 @@ fn engine(config: &Config, catalog: Arc<ArcSwap<AppCatalog>>) -> Engine {
             .map(|w| (w.keyword.clone(), Target::WebSearch(w.id.clone())))
             .chain(config.quick_links.iter().filter(|_| p.quick_links).map(|l| (l.keyword.clone(), Target::QuickLink(l.id.clone()))))
             // Built in, after the user's keywords (one of theirs named `sn` wins).
-            .chain((!config.snippets.items.is_empty()).then(|| ("sn".to_string(), Target::Snippets))),
+            .chain((!config.snippets.items.is_empty()).then(|| ("sn".to_string(), Target::Snippets)))
+            .chain(p.files.then(|| ("f".to_string(), Target::Files))),
     );
-    Engine::new(providers, keywords)
+    (Engine::new(providers, keywords), files)
 }
 
 /// Asks for a rescan of installed apps.
@@ -168,6 +179,12 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
         let lopts = launcher::Options { rows, blur: 28., alpha: 0.8 };
         let bounds = Bounds { origin: point(px(0.), px(0.)), size: size(px(launcher::WIDTH), px(launcher::height(rows))) };
         let window_engine = engine(&config, catalog.clone());
+        let file_events = events.clone();
+        let file_search = files::FileSearch::start(Box::new(move |r| {
+            let _ = file_events.unbounded_send(Event::Files(r));
+        }))
+        .map_err(|e| log::warn!("file search: {e:#}"))
+        .ok();
         let window_usage = usage.clone();
         let handle: WindowHandle<Launcher> = match cx.open_window(
             WindowOptions {
@@ -183,7 +200,7 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
                 app_id: Some("redsnap".into()),
                 ..Default::default()
             },
-            |window, cx| cx.new(|cx| Launcher::new(window_engine, window_usage, lopts, window, cx)),
+            |window, cx| cx.new(|cx| Launcher::new(window_engine, file_search, window_usage, lopts, window, cx)),
         ) {
             Ok(h) => h,
             Err(e) => {
@@ -397,6 +414,9 @@ impl State {
                         crate::execute::fail("Inserting the snippet", e);
                     }
                 });
+            }
+            Event::Files(r) => {
+                handle.update(cx, |l, _, cx| l.files_arrived(r, cx)).ok();
             }
             Event::Tray(TrayCommand::ToggleStartAtLogin) => {
                 if let Err(e) = autostart::set(!autostart::is_enabled()) {

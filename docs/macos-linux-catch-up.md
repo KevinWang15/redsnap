@@ -104,6 +104,8 @@ MetalToolchain` if `xcrun metal` is missing).
 | Settings app (system webview) | done (WebView2) | `../Resources/settings/redsnap-settings` (WKWebView); untested | WebKitGTK; tested in dev mode |
 | Snippets: insert from the launcher | done | **not implemented** | **not implemented** |
 | Snippets: expand as you type | done (keyboard hook) | **not implemented** | **not implemented** |
+| File search (`f …`) | Everything over IPC; unit-tested, needs a live check | Spotlight (`mdfind`); never run on a Mac | plocate/locate; tested with a stand-in `plocate` |
+| Folder browsing (typed paths) | done | shared code; untested on a Mac | tested on Xvfb |
 | Latency measured | yes (PLAN.md §7) | **no** (CI bench stalled after ~3 shows) | Xvfb only |
 
 ## macOS tasks
@@ -182,6 +184,12 @@ MetalToolchain` if `xcrun metal` is missing).
     input fields (`IsSecureEventInputEnabled`). Reuse
     `redsnap_core::snippets::{Typed, Triggers, render}` as Windows does.
 
+13. **File search** (docs/files.md): run `cargo run -p redsnap-platform
+    --example find_files -- <words>` and check that `mdfind` answers within a
+    few hundred ms. Check that names with accents and CJK characters match,
+    and that `.app` bundles open as apps. Also check that `f` in the launcher
+    shows the results.
+
 ## Linux tasks
 
 1. **Wayland.** Today `platform::window::native()` returns `None` for Wayland
@@ -233,6 +241,11 @@ MetalToolchain` if `xcrun metal` is missing).
     gives apps no global key access; expansion is unavailable there (say so
     in Settings → Snippets), inserting may work through the portal
     RemoteDesktop/virtual keyboard where offered.
+
+11. **File search** (docs/files.md): install plocate on a real desktop, run
+    `sudo updatedb`, and check `f` in the launcher and the `find_files`
+    example. Check the "needs plocate" and "index isn't built" rows on a
+    machine without it.
 
 ## Done when
 

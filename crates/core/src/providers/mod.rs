@@ -40,12 +40,10 @@ impl Provider for CalculatorProvider {
     }
 }
 
-// ----- open a typed URL or path ------------------------------------------------
+// ----- open a typed URL -------------------------------------------------------
+// (Typed paths are folder browsing: crate::files.)
 
-pub struct OpenProvider {
-    /// The home directory, for `~/…`.
-    pub home: Option<std::path::PathBuf>,
-}
+pub struct OpenProvider;
 
 fn looks_like_url(s: &str) -> Option<String> {
     let lower = s.to_ascii_lowercase();
@@ -72,41 +70,17 @@ fn looks_like_url(s: &str) -> Option<String> {
     (lower.starts_with("www.") || plausible).then(|| format!("https://{s}"))
 }
 
-fn looks_like_path(s: &str) -> bool {
-    let b = s.as_bytes();
-    s.starts_with('/')
-        || s.starts_with("~/")
-        || s == "~"
-        || s.starts_with("\\\\")
-        || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/'))
-}
-
 impl Provider for OpenProvider {
     fn id(&self) -> ProviderId {
         ProviderId::Open
     }
 
     fn search(&self, q: &Query, _: &mut SearchContext, out: &mut Vec<Candidate>) {
-        if q.route.is_some() || q.is_empty() {
+        if q.route.is_some() || q.is_empty() || crate::files::looks_like_path(&q.text) {
             return;
         }
-        let text = q.text.as_str();
-        if looks_like_path(text) {
-            let path = match (text.strip_prefix('~'), &self.home) {
-                (Some(rest), Some(home)) => home.join(rest.trim_start_matches(['/', '\\'])),
-                _ => text.into(),
-            };
-            out.push(Candidate::top(Item {
-                id: ItemId::new("open", "path"),
-                provider: ProviderId::Open,
-                title: format!("Open {text}"),
-                subtitle: path.display().to_string(),
-                icon: IconRef::Builtin("folder"),
-                primary: Action::OpenPath(path.clone()),
-                secondary: Some(Action::RevealPath(path)),
-                learnable: false,
-            }));
-        } else if let Some(url) = looks_like_url(text).filter(|u| url_allowed(u)) {
+        if let Some(url) = looks_like_url(&q.text).filter(|u| url_allowed(u)) {
+            let text = q.text.as_str();
             out.push(Candidate::top(Item {
                 id: ItemId::new("open", "url"),
                 provider: ProviderId::Open,
@@ -385,7 +359,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn urls_and_paths() {
+    fn urls() {
         assert_eq!(looks_like_url("example.com").as_deref(), Some("https://example.com"));
         assert_eq!(looks_like_url("www.example.com/x").as_deref(), Some("https://www.example.com/x"));
         assert_eq!(looks_like_url("http://localhost:8080").as_deref(), Some("http://localhost:8080"));
@@ -393,10 +367,6 @@ mod tests {
         assert_eq!(looks_like_url("notes.txt"), None);
         assert_eq!(looks_like_url("1.5"), None);
         assert_eq!(looks_like_url("hello world.com"), None);
-        assert!(looks_like_path("~/dev"));
-        assert!(looks_like_path("C:\\Users"));
-        assert!(looks_like_path("/etc/hosts"));
-        assert!(!looks_like_path("safari"));
     }
 
     #[test]

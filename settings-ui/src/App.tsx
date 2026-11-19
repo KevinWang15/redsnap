@@ -280,6 +280,14 @@ function General({ c, set, save }: Edit & { save: Save }) {
   );
 }
 
+/** What `f` searches on this OS. */
+function fileIndex() {
+  const p = window.redsnap?.platform;
+  if (p === "win32") return "uses Everything (voidtools.com)";
+  if (p === "darwin") return "uses Spotlight";
+  return "uses plocate";
+}
+
 function startLabel() {
   return window.redsnap?.platform === "win32"
     ? "Start with Windows"
@@ -305,8 +313,13 @@ const PROVIDERS: {
   { key: "quickLinks", label: "Quick links", hint: "Your saved links" },
   {
     key: "open",
-    label: "Open URLs and paths",
-    hint: "Type github.com or C:\\Users",
+    label: "Open URLs and browse folders",
+    hint: "Type github.com, or a path like C:\\Users\\ to list it",
+  },
+  {
+    key: "files",
+    label: "File search",
+    hint: `f and a name: f report · ${fileIndex()}`,
   },
   {
     key: "commands",

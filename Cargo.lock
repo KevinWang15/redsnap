@@ -5671,6 +5671,7 @@ dependencies = [
  "resvg",
  "serde",
  "serde_json",
+ "tempfile",
  "tray-icon",
  "windows 0.61.3",
  "windows-sys 0.61.2",

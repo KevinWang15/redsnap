@@ -13,9 +13,11 @@ use gpui::{
     AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable, KeyBinding, RenderImage, Window, WindowHandle,
     actions,
 };
+use redsnap_core::files::{FileRequest, FileResults, Files};
 use redsnap_core::item::{Action, Item};
 use redsnap_core::search::{Engine, Hit};
 use redsnap_core::usage::UsageStore;
+use redsnap_platform::files::FileSearch;
 use redsnap_platform::window::{self as os, Native};
 
 use crate::execute;
@@ -87,6 +89,12 @@ struct ActionPanel {
 pub struct Launcher {
     field: Entity<QueryField>,
     engine: Engine,
+    /// What the query wants from the file index or a folder, shared with
+    /// the engine's files provider.
+    files: Arc<Files>,
+    file_search: Option<FileSearch>,
+    /// The last request sent, so each is sent once.
+    files_asked: Option<FileRequest>,
     usage: UsageStore,
     query: String,
     hits: Vec<Hit>,
@@ -119,7 +127,14 @@ pub fn now_ms() -> i64 {
 }
 
 impl Launcher {
-    pub fn new(engine: Engine, usage: UsageStore, opts: Options, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        (engine, files): (Engine, Arc<Files>),
+        file_search: Option<FileSearch>,
+        usage: UsageStore,
+        opts: Options,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let field = cx.new(|cx| QueryField::new("Search apps and commands", cx));
         let subs = vec![
             cx.subscribe(&field, |this, _, _: &QueryChanged, cx| this.query_changed(cx)),
@@ -139,6 +154,9 @@ impl Launcher {
         let mut this = Launcher {
             field,
             engine,
+            files,
+            file_search,
+            files_asked: None,
             usage,
             query: String::new(),
             hits: Vec::new(),
@@ -163,8 +181,10 @@ impl Launcher {
     }
 
     /// Settings changed what search finds (providers, keywords).
-    pub fn set_engine(&mut self, engine: Engine, cx: &mut Context<Self>) {
+    pub fn set_engine(&mut self, (engine, files): (Engine, Arc<Files>), cx: &mut Context<Self>) {
         self.engine = engine;
+        self.files = files;
+        self.files_asked = None;
         self.refresh();
         cx.notify();
     }
@@ -185,11 +205,30 @@ impl Launcher {
     fn refresh(&mut self) {
         let keep = self.hits.get(self.selected).map(|h| h.item.id.clone());
         let usage = self.usage.snapshot();
-        let (_, hits) = self.engine.search(&self.query, &usage, now_ms(), LIMIT);
+        let (q, hits) = self.engine.search(&self.query, &usage, now_ms(), LIMIT);
         self.hits = hits;
+        // Files come from another thread: ask (once per request); the answer
+        // searches again (`files_arrived`).
+        let want = self.files.request(&q);
+        if want.is_some() && want != self.files_asked
+            && let (Some(s), Some(r)) = (&self.file_search, &want)
+        {
+            s.request(r.clone());
+        }
+        self.files_asked = want;
         self.selected = keep.and_then(|id| self.hits.iter().position(|h| h.item.id == id)).unwrap_or(0);
         self.scroll_to_selected();
         perf::results_ready();
+    }
+
+    /// The file index or a folder listing answered.
+    pub fn files_arrived(&mut self, r: FileResults, cx: &mut Context<Self>) {
+        self.files.set_results(r);
+        if self.visible && !self.in_clipboard() {
+            self.refresh();
+            cx.notify();
+            self.paint_soon(cx);
+        }
     }
 
     /// Whether the clipboard view is showing: opened with its shortcut, or
@@ -260,6 +299,8 @@ impl Launcher {
             self.notice = Some(e);
         }
         self.had_focus = false;
+        // Folders may have changed since the last show: list them again.
+        self.files_asked = None;
         self.field.update(cx, |f, cx| f.clear(cx));
         self.query.clear();
         self.panel = None;
@@ -385,15 +426,17 @@ impl Launcher {
             return;
         }
         if self.panel.take().is_none()
-            && let Some(hit) = self.hits.get(self.selected)
+            && let Some(hit) = self.hits.get(self.selected).filter(|h| h.item.primary != Action::Nothing)
         {
             // Built only now, for the one selected item.
             let item = hit.item.clone();
             let mut actions = vec![item.primary.clone()];
             actions.extend(item.secondary.clone());
-            let copy = Action::CopyText(item.title.clone());
-            if !actions.contains(&copy) {
-                actions.push(copy);
+            let path = view::panel_path(&item).map(|p| Action::CopyText(p.display().to_string()));
+            for copy in [Some(Action::CopyText(item.title.clone())), path].into_iter().flatten() {
+                if !actions.contains(&copy) {
+                    actions.push(copy);
+                }
             }
             self.panel = Some(ActionPanel { item, actions, selected: 0 });
         }
@@ -441,6 +484,17 @@ impl Launcher {
     /// Runs `action` for `item`: asks for confirmation first for commands that
     /// end the session, teaches ranking, hides the window, then acts.
     fn execute(&mut self, item: Arc<Item>, action: Action, cx: &mut Context<Self>) {
+        match &action {
+            Action::Nothing => return,
+            // Into a folder: the query becomes its path, the window stays.
+            Action::Browse(text) => {
+                let text = text.clone();
+                self.panel = None;
+                self.field.update(cx, |f, cx| f.set_text(&text, cx));
+                return;
+            }
+            _ => {}
+        }
         if let Action::System(c) = &action
             && c.needs_confirmation()
             && self.confirming.as_ref().is_none_or(|i| i.id != item.id)

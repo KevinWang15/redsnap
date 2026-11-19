@@ -25,6 +25,7 @@ impl ItemId {
 pub enum ProviderId {
     Calculator,
     Open,
+    Files,
     Apps,
     Commands,
     Snippets,
@@ -92,6 +93,11 @@ pub enum Action {
     RedSnap(InternalCommand),
     /// Types the snippet with this id into the app that was in front.
     Snippet(String),
+    /// Replaces the query with this text and stays open: a folder's path,
+    /// to list what's in it.
+    Browse(String),
+    /// A row that only informs (a hint, a status).
+    Nothing,
 }
 
 impl Action {
@@ -111,6 +117,8 @@ impl Action {
             }
             Action::CopyText(_) => "Copy",
             Action::Snippet(_) => "Insert",
+            Action::Browse(_) => "Browse",
+            Action::Nothing => "",
             Action::System(_) | Action::RedSnap(_) => "Run",
         }
     }
