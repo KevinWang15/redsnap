@@ -120,16 +120,24 @@ fn engine(config: &Config, catalog: Arc<ArcSwap<AppCatalog>>) -> (Engine, Arc<Fi
     (Engine::new(providers, keywords), files)
 }
 
-/// The panel's look. Being tried (2026-11-19): Windows 11's acrylic, blurred
-/// live by DWM, behind a translucent fill. Until a variant is picked, each
-/// run takes it from the environment:
-/// - `REDSNAP_BACKDROP`: `acrylic` (default on Windows) or `none`;
+/// The panel's look. Being tried (2026-11-19): a blur of what's behind the
+/// window, drawn live by the compositor, behind a translucent fill. Until a
+/// variant is picked, each run takes it from the environment:
+/// - `REDSNAP_BACKDROP`: `acrylic` (Windows 11's, through
+///   `DwmSetWindowAttribute`; default on Windows), `accent` (gpui's
+///   `Blurred`: the older, undocumented `SetWindowCompositionAttribute`
+///   acrylic) or `none`;
 /// - `REDSNAP_CORNERS`: `dwm` (Windows rounds the window, 8 px, smooth;
 ///   default) or `region` (a 20 px window region, aliased);
 /// - `REDSNAP_FILL`: the fill's opacity, 0 to 1 (default 0.6; 0.97 without
 ///   a backdrop).
 #[derive(Clone, Copy, Debug)]
 struct Glass {
+    /// gpui's window background. On Windows its `Transparent` sets an
+    /// accent (`SetWindowCompositionAttribute`) that DWM draws instead of a
+    /// system backdrop, so the DWM acrylic needs `Opaque` (accent off); the
+    /// window stays transparent either way (gpui composites with alpha).
+    appearance: WindowBackgroundAppearance,
     backdrop: os::Backdrop,
     clip: os::Clip,
     radius: f32,
@@ -139,20 +147,25 @@ struct Glass {
 impl Glass {
     fn from_env() -> Self {
         let var = |k: &str| std::env::var(k).ok().map(|v| v.trim().to_ascii_lowercase());
-        let acrylic = cfg!(windows) && var("REDSNAP_BACKDROP").as_deref() != Some("none");
-        if !acrylic {
-            // The panel draws its own 20 px corners on a transparent window.
-            let fill = var("REDSNAP_FILL").and_then(|v| v.parse().ok()).unwrap_or(0.97f32).clamp(0., 1.);
-            return Glass { backdrop: os::Backdrop::None, clip: os::Clip::None, radius: 20., fill };
-        }
-        // The acrylic fills the window's rectangle, so the window itself
-        // must have the panel's shape.
+        let kind = if cfg!(windows) { var("REDSNAP_BACKDROP").unwrap_or_else(|| "acrylic".into()) } else { "none".into() };
+        let (appearance, backdrop) = match kind.as_str() {
+            "acrylic" => (WindowBackgroundAppearance::Opaque, os::Backdrop::Acrylic),
+            "accent" => (WindowBackgroundAppearance::Blurred, os::Backdrop::None),
+            _ => {
+                // The panel draws its own 20 px corners on a transparent window.
+                let fill = var("REDSNAP_FILL").and_then(|v| v.parse().ok()).unwrap_or(0.97f32).clamp(0., 1.);
+                let appearance = WindowBackgroundAppearance::Transparent;
+                return Glass { appearance, backdrop: os::Backdrop::None, clip: os::Clip::None, radius: 20., fill };
+            }
+        };
+        // The blur fills the window's rectangle, so the window itself must
+        // have the panel's shape.
         let (clip, radius) = match var("REDSNAP_CORNERS").as_deref() {
             Some("region") => (os::Clip::Region, 20.),
             _ => (os::Clip::Dwm, 8.),
         };
         let fill = var("REDSNAP_FILL").and_then(|v| v.parse().ok()).unwrap_or(0.6f32).clamp(0., 1.);
-        let glass = Glass { backdrop: os::Backdrop::Acrylic, clip, radius, fill };
+        let glass = Glass { appearance, backdrop, clip, radius, fill };
         log::info!("look: {glass:?}");
         glass
     }
@@ -235,7 +248,7 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
                 is_movable: false,
                 is_resizable: false,
                 is_minimizable: false,
-                window_background: WindowBackgroundAppearance::Transparent,
+                window_background: glass.appearance,
                 app_id: Some("redsnap".into()),
                 ..Default::default()
             },
