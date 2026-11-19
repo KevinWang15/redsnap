@@ -3,6 +3,7 @@
 //! any platform.
 
 pub mod calc;
+pub mod clipboard;
 pub mod config;
 pub mod item;
 pub mod matcher;

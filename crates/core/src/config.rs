@@ -35,6 +35,38 @@ pub struct Config {
     pub hidden_apps: Vec<String>,
     /// Folders scanned for apps besides the OS defaults.
     pub extra_app_folders: Vec<PathBuf>,
+    /// Optional in the file: added after the first release of this format.
+    #[serde(default)]
+    pub clipboard: Clipboard,
+}
+
+/// Clipboard history (docs/clipboard.md).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Clipboard {
+    pub enabled: bool,
+    /// Opens the window straight in the clipboard view.
+    pub hotkey: String,
+    pub keep_days: u32,
+    pub max_entries: u32,
+    /// Copies from these apps are skipped (by executable or app name, e.g.
+    /// `KeePassXC.exe`, `1Password`).
+    pub excluded_apps: Vec<String>,
+    /// List skipped copies (dimmed) with the reason.
+    pub show_skipped: bool,
+}
+
+impl Default for Clipboard {
+    fn default() -> Self {
+        Clipboard {
+            enabled: true,
+            hotkey: "Ctrl+Alt+V".into(),
+            keep_days: 30,
+            max_entries: 5000,
+            excluded_apps: Vec::new(),
+            show_skipped: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +137,7 @@ impl Default for Config {
             app_aliases: BTreeMap::new(),
             hidden_apps: Vec::new(),
             extra_app_folders: Vec::new(),
+            clipboard: Clipboard::default(),
         }
     }
 }
@@ -142,6 +175,12 @@ impl Config {
             if !crate::item::url_allowed(url) {
                 bail!("{field}: {url:?} isn't an http(s) URL");
             }
+        }
+        if !(1..=3650).contains(&self.clipboard.keep_days) {
+            bail!("clipboard.keepDays: must be 1 to 3650, found {}", self.clipboard.keep_days);
+        }
+        if !(10..=100_000).contains(&self.clipboard.max_entries) {
+            bail!("clipboard.maxEntries: must be 10 to 100000, found {}", self.clipboard.max_entries);
         }
         if self.web_searches.iter().any(|w| !w.url.contains("{query}")) {
             bail!("webSearches: every URL needs {{query}}");
@@ -344,6 +383,14 @@ mod tests {
             .filter_map(|e| e.ok())
             .any(|e| e.file_name().to_string_lossy().starts_with("config.invalid-"));
         assert!(moved);
+    }
+
+    #[test]
+    fn files_without_the_clipboard_section_still_load() {
+        let mut v: serde_json::Value = serde_json::from_str(&Config::default().to_json()).unwrap();
+        v.as_object_mut().unwrap().remove("clipboard");
+        let c = Config::from_json(&v.to_string()).unwrap();
+        assert_eq!(c.clipboard, Clipboard::default());
     }
 
     #[test]
