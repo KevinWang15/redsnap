@@ -14,7 +14,8 @@ dirs = "6"
 env_logger = "0.11"
 futures = "0.3"
 global-hotkey = "0.10"
-gpui = "0.2.2"
+gpui.workspace = true
+gpui_platform.workspace = true
 image = { version = "0.25", default-features = false }
 log.workspace = true
 redsnap-core.workspace = true

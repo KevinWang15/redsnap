@@ -29,11 +29,9 @@ Read first: `PLAN.md` (architecture, §5 implementation rules), `docs/design.md`
 | Path | What |
 |---|---|
 | `crates/core` | Search engine, ranking, calculator, config, usage store, clipboard store and search. No OS code; fully tested anywhere. |
-| `crates/platform` | Every OS call: `window.rs` (show/hide/place/paint), `apps/` (discovery + icons per OS), `clipboard/` (capture/write/paste), `autostart.rs`, `instance.rs` (single instance), `settings_ipc.rs`, `open.rs` (launch, open, system commands), `tray.rs`. |
-| `crates/app` | The `redsnap` binary: gpui search window (`launcher/`), event loop (`app.rs`), shortcuts (`hotkeys.rs`), settings host (`settings.rs`), icons. |
-| `settings-ui/` | Settings UI: Vite + React + TypeScript + Tailwind. |
-| `crates/settings-host` | `redsnap-settings`: shows settings-ui in the system webview (wry: WebView2 / WKWebView / WebKitGTK). |
-| `third_party/gpui` | Vendored gpui 0.2.2 with patches listed in `PATCHES.md`. |
+| `crates/platform` | Every OS call: `window.rs` (show/hide/place/paint), `apps/` (discovery + icons per OS), `clipboard/` (capture/write/paste), `autostart.rs`, `instance.rs` (single instance), `open.rs` (launch, open, system commands), `tray.rs`. |
+| `crates/app` | The `redsnap` binary: gpui search window (`launcher/`), event loop (`app.rs`), shortcuts (`hotkeys.rs`), settings window (`settings/`, gpui components), icons. |
+| gpui | The fork at github.com/KevinWang15/gpui, pinned in `Cargo.toml` (PLAN.md §6.1). Changes to gpui go there as commits. |
 
 ## Build and run
 
@@ -50,15 +48,6 @@ target/debug/redsnap --profile=/tmp/rs1 --perf=/tmp/rs1/perf.jsonl
 
 Logs: `<profile>/data/logs/redsnap.log` (`RUST_LOG=redsnap=debug` for more).
 
-Settings app in development:
-
-```sh
-(cd settings-ui && npm ci && npm run build)
-cargo build -p redsnap-settings
-REDSNAP_SETTINGS_BIN="$PWD/target/debug/redsnap-settings" \
-REDSNAP_SETTINGS_WEB="$PWD/settings-ui/dist" \
-  target/debug/redsnap --profile=/tmp/rs1
-```
 
 Linux build dependencies (Debian/Ubuntu): `libxkbcommon-x11-dev libwayland-dev
 libvulkan-dev libfontconfig-dev libfreetype-dev libxcb1-dev libx11-xcb-dev
@@ -100,7 +89,7 @@ MetalToolchain` if `xcrun metal` is missing).
 | Paste into previous app | done | **not implemented** | **not implemented** |
 | Start at login | done | LaunchAgent plist; untested | `~/.config/autostart`; untested |
 | Single instance / CLI | done | Unix socket; tested in CI | tested |
-| Settings app (system webview) | done (WebView2) | `../Resources/settings/redsnap-settings` (WKWebView); untested | WebKitGTK; tested in dev mode |
+| Settings window (gpui) | done | untested (traffic lights over the painted title bar) | tested on Xvfb |
 | Snippets: insert from the launcher | done | **not implemented** | **not implemented** |
 | Snippets: expand as you type | done (keyboard hook) | **not implemented** | **not implemented** |
 | File search (`f …`) | Everything over IPC; unit-tested, needs a live check | Spotlight (`mdfind`); never run on a Mac | plocate/locate; tested with a stand-in `plocate` |
@@ -123,7 +112,7 @@ MetalToolchain` if `xcrun metal` is missing).
    display ids may be enough, or use AppKit on the raw `NSView`'s window.
 3. **Paint right after input:** find the gpui macOS equivalent of
    `paint_now` (gpui draws from a CVDisplayLink/`displayLayer` callback);
-   likely a small patch in `third_party/gpui` (document it in `PATCHES.md`).
+   likely a small change in the gpui fork (a commit there; list it in PLAN.md §6.1).
    Measure with `--perf` before and after.
 4. **App Nap:** a hidden launcher is exactly what App Nap throttles. Decide
    and implement (e.g. `NSProcessInfo beginActivityWithOptions:
@@ -242,9 +231,9 @@ MetalToolchain` if `xcrun metal` is missing).
 ## Done when
 
 - The search window, clipboard history (capture, list, preview, paste) and
-  the settings app work on a real Mac and a real Linux desktop (X11; Wayland
+  the settings window work on a real Mac and a real Linux desktop (X11; Wayland
   as far as the compositor allows), with the gaps that the OS imposes shown
   to the user, not silently missing.
 - Latency on each is measured with `--perf` and recorded in `PLAN.md` §7.
-- `cargo test --workspace`, clippy and the settings-ui lint/build pass; Windows
+- `cargo test --workspace` and clippy pass; Windows
   still builds.

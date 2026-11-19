@@ -48,24 +48,24 @@ pub fn bind_keys(cx: &mut gpui::App) {
         KeyBinding::new("pageup", PageUp, c),
         KeyBinding::new("shift-pagedown", PreviewDown, c),
         KeyBinding::new("shift-pageup", PreviewUp, c),
-        KeyBinding::new("secondary-p", TogglePin, c),
+        KeyBinding::new(secondary!("p"), TogglePin, c),
         // Cmd+Backspace in Finder; Ctrl+Delete elsewhere (Ctrl+Backspace means
         // "delete the previous word" in a text box).
         KeyBinding::new(if cfg!(target_os = "macos") { "cmd-backspace" } else { "ctrl-delete" }, DeleteEntry, c),
         KeyBinding::new("enter", Run, c),
-        KeyBinding::new("secondary-enter", RunSecondary, c),
+        KeyBinding::new(secondary!("enter"), RunSecondary, c),
         KeyBinding::new("tab", ToggleActions, c),
-        KeyBinding::new("secondary-k", ToggleActions, c),
+        KeyBinding::new(secondary!("k"), ToggleActions, c),
         KeyBinding::new("escape", Dismiss, c),
-        KeyBinding::new("secondary-1", Run1, c),
-        KeyBinding::new("secondary-2", Run2, c),
-        KeyBinding::new("secondary-3", Run3, c),
-        KeyBinding::new("secondary-4", Run4, c),
-        KeyBinding::new("secondary-5", Run5, c),
-        KeyBinding::new("secondary-6", Run6, c),
-        KeyBinding::new("secondary-7", Run7, c),
-        KeyBinding::new("secondary-8", Run8, c),
-        KeyBinding::new("secondary-9", Run9, c),
+        KeyBinding::new(secondary!("1"), Run1, c),
+        KeyBinding::new(secondary!("2"), Run2, c),
+        KeyBinding::new(secondary!("3"), Run3, c),
+        KeyBinding::new(secondary!("4"), Run4, c),
+        KeyBinding::new(secondary!("5"), Run5, c),
+        KeyBinding::new(secondary!("6"), Run6, c),
+        KeyBinding::new(secondary!("7"), Run7, c),
+        KeyBinding::new(secondary!("8"), Run8, c),
+        KeyBinding::new(secondary!("9"), Run9, c),
     ]);
 }
 
@@ -304,7 +304,7 @@ impl Launcher {
         if clipboard {
             self.refresh_clipboard(cx);
         }
-        window.focus(&self.field.focus_handle(cx));
+        window.focus(&self.field.focus_handle(cx), cx);
         cx.notify();
     }
 
@@ -321,7 +321,7 @@ impl Launcher {
         let native = self.native;
         cx.spawn(async move |_, cx| {
             if cfg!(target_os = "macos") {
-                cx.update(|cx| cx.hide()).ok();
+                cx.update(|cx| cx.hide());
             } else if let Some(n) = native {
                 os::hide(n);
             }
@@ -526,7 +526,7 @@ pub async fn show(handle: WindowHandle<Launcher>, started: Instant, clipboard: b
     });
     let Ok((native, opts)) = prepared else { return };
     if cfg!(target_os = "macos") {
-        cx.update(|cx| cx.activate(true)).ok();
+        cx.update(|cx| cx.activate(true));
         handle.update(cx, |_, window, _| window.activate_window()).ok();
         return;
     }

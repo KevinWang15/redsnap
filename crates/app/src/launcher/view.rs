@@ -71,7 +71,7 @@ impl Render for Launcher {
                                 .child(icon_svg(crate::assets::icon::X, 14., white(0.8)))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.field.update(cx, |f, cx| f.clear(cx));
-                                    window.focus(&this.field.focus_handle(cx));
+                                    window.focus(&this.field.focus_handle(cx), cx);
                                 })),
                         )
                     }),
@@ -220,6 +220,7 @@ impl Launcher {
                         offset: point(px(0.), px(4.)),
                         blur_radius: px(18.),
                         spread_radius: px(0.),
+            inset: false,
                     }])
             })
             .on_click(cx.listener(move |this, _, _, cx| this.run_row(slot, cx)))
@@ -324,6 +325,7 @@ pub(super) fn panel_view(title: SharedString, labels: Vec<String>, selected: usi
             offset: point(px(0.), px(8.)),
             blur_radius: px(24.),
             spread_radius: px(0.),
+            inset: false,
         }])
         .flex()
         .flex_col()

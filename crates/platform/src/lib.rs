@@ -9,7 +9,6 @@ pub mod icon;
 pub mod instance;
 pub mod open;
 pub mod paths;
-pub mod settings_ipc;
 pub mod snippets;
 pub mod tray;
 pub mod window;

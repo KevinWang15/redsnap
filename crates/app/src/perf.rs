@@ -76,16 +76,6 @@ pub fn results_ready() {
     }
 }
 
-/// Records a measurement that isn't tied to a presented frame.
-pub fn record(name: &'static str, value_ms: f64) {
-    let mut s = STATE.lock().unwrap();
-    if !s.enabled {
-        return;
-    }
-    write_line(&mut s, name, value_ms, None);
-    s.samples.entry(name).or_default().push(value_ms);
-}
-
 pub fn presents() -> u64 {
     STATE.lock().unwrap().presents
 }

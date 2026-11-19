@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/app", "crates/core", "crates/platform", "crates/settings-host"]
+members = ["crates/app", "crates/core", "crates/platform"]
 
 [workspace.package]
 version = "0.0.0"
@@ -11,14 +11,11 @@ license = "MIT"
 lto = "thin"
 codegen-units = 1
 
-[patch.crates-io]
-# Vendored gpui 0.2.2 with the patches listed in third_party/gpui/PATCHES.md.
-gpui = { path = "third_party/gpui" }
-# gpui 0.2.2 pulls in xattr 0.2.3, which no longer builds on Linux against
-# current libc (ENOATTR was removed there).
-xattr = { path = "third_party/xattr" }
 
 [workspace.dependencies]
+# The gpui fork (PLAN.md §6.1); RedSnap's changes to gpui are commits there.
+gpui = { git = "https://github.com/KevinWang15/gpui", rev = "37ff9b0dad234547bf0c42aa79d8584b843b671f" }
+gpui_platform = { git = "https://github.com/KevinWang15/gpui", rev = "37ff9b0dad234547bf0c42aa79d8584b843b671f", features = ["x11", "wayland"] }
 redsnap-core = { path = "crates/core" }
 redsnap-platform = { path = "crates/platform" }
 anyhow = "1"

@@ -34,10 +34,10 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-right", SelectRight, c),
         KeyBinding::new("home", Home, c),
         KeyBinding::new("end", End, c),
-        KeyBinding::new("secondary-a", SelectAll, c),
-        KeyBinding::new("secondary-v", Paste, c),
-        KeyBinding::new("secondary-x", Cut, c),
-        KeyBinding::new("secondary-c", Copy, c),
+        KeyBinding::new(secondary!("a"), SelectAll, c),
+        KeyBinding::new(secondary!("v"), Paste, c),
+        KeyBinding::new(secondary!("x"), Cut, c),
+        KeyBinding::new(secondary!("c"), Copy, c),
     ]);
 }
 
@@ -246,7 +246,7 @@ impl QueryField {
     }
 
     fn mouse_down(&mut self, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        window.focus(&self.focus);
+        window.focus(&self.focus, cx);
         self.selecting = true;
         let at = self.index_for_position(ev.position);
         if ev.modifiers.shift {
@@ -418,14 +418,6 @@ struct Prepaint {
     selection: Option<PaintQuad>,
 }
 
-impl IntoElement for TextElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
 impl Element for TextElement {
     type RequestLayoutState = ();
     type PrepaintState = Prepaint;
@@ -540,7 +532,7 @@ impl Element for TextElement {
                 window.paint_quad(selection);
             }
             let origin = point(bounds.left() - scroll, bounds.top());
-            prepaint.line.paint(origin, window.line_height(), window, cx).ok();
+            prepaint.line.paint(origin, window.line_height(), gpui::TextAlign::Left, None, window, cx).ok();
             if focus.is_focused(window)
                 && let Some(caret) = prepaint.caret.take()
             {

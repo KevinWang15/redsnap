@@ -11,12 +11,12 @@ use arc_swap::ArcSwap;
 use futures::StreamExt;
 use futures::channel::mpsc::UnboundedSender;
 use gpui::{
-    App, AppContext, Application, AsyncApp, BorrowAppContext, Bounds, RenderImage, WindowBackgroundAppearance, WindowBounds, WindowHandle,
+    App, AppContext, AsyncApp, BorrowAppContext, Bounds, RenderImage, WindowBackgroundAppearance, WindowBounds, WindowHandle,
     WindowKind, WindowOptions, point, px, size,
 };
 use redsnap_core::config::{self, Config};
 use redsnap_core::files::{Files, FilesProvider};
-use redsnap_core::item::{Action, ItemId};
+use redsnap_core::item::ItemId;
 use redsnap_core::providers::apps::{AppCatalog, AppEntry, AppsProvider};
 use redsnap_core::providers::{
     CalculatorProvider, CommandsProvider, OpenProvider, QuickLinksProvider, SnippetsProvider, WebSearchProvider,
@@ -27,7 +27,6 @@ use redsnap_core::search::{Engine, Provider};
 use redsnap_core::usage::UsageStore;
 use redsnap_platform::instance::CliCommand;
 use redsnap_platform::paths::Paths;
-use redsnap_platform::settings_ipc::Reply;
 use redsnap_platform::tray::{Tray, TrayCommand};
 use redsnap_platform::{autostart, files, open, window as os};
 use serde_json::{Value, json};
@@ -36,7 +35,7 @@ use crate::execute::Shell;
 use crate::hotkeys::Hotkeys;
 use crate::launcher::clip::Clipboard;
 use crate::launcher::{self, Launcher};
-use crate::settings::SettingsHost;
+use crate::settings::{Reply, SettingsHost};
 
 /// Everything that reaches the app from outside gpui, in one channel.
 pub enum Event {
@@ -52,7 +51,7 @@ pub enum Event {
     Icon(ItemId, Option<Arc<RenderImage>>),
     /// Open (or bring forward) the settings app.
     OpenSettings,
-    /// A request from the settings app.
+    /// A request from the settings window.
     Settings(String, Value, Reply),
     SettingsClosed,
     /// Type a snippet into the window that was in front.
@@ -163,7 +162,7 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
     let usage = UsageStore::open(&paths.data.join("usage.db"))?;
     autostart::refresh();
 
-    Application::new().with_assets(crate::assets::Assets).run(move |cx| {
+    gpui_platform::application().with_assets(crate::assets::Assets).run(move |cx| {
         cx.set_global(Shell { paths: paths.clone() });
         cx.set_global(Events(events.clone()));
         let catalog = Arc::new(ArcSwap::from_pointee(AppCatalog::empty()));
@@ -172,6 +171,9 @@ pub fn run(paths: Paths, opts: Options, events: UnboundedSender<Event>, mut rx: 
             let _ = icon_events.unbounded_send(Event::Icon(id, icon));
         }));
         let _ = events.unbounded_send(Event::Rescan);
+        // The settings window's components and theme.
+        gpui::components::Theme::set_global(crate::settings::theme(), cx);
+        gpui::components::init_components(cx);
         crate::launcher::query_field::bind_keys(cx);
         launcher::bind_keys(cx);
 
@@ -342,7 +344,7 @@ impl State {
             Event::Rescan if self.scanning => {}
             Event::Rescan => {
                 self.scanning = true;
-                self.push_stats();
+                self.push_stats(cx);
                 let extra = self.config.extra_app_folders.clone();
                 let tx = self.events.clone();
                 cx.background_executor()
@@ -363,7 +365,7 @@ impl State {
                 self.rebuild_catalog(cx, true);
             }
             Event::Icon(id, icon) => {
-                cx.update(|cx| cx.global::<crate::icons::Icons>().finished(id, icon)).ok();
+                cx.update(|cx| cx.global::<crate::icons::Icons>().finished(id, icon));
                 if visible {
                     handle.update(cx, |_, _, cx| cx.notify()).ok();
                 }
@@ -374,11 +376,8 @@ impl State {
                 }
             }
             Event::Cli(CliCommand::Settings) | Event::Tray(TrayCommand::Settings) | Event::OpenSettings => {
-                if let Err(e) = self.settings.open(&self.paths, &self.events) {
+                if let Err(e) = self.settings.open(cx) {
                     log::warn!("opening settings: {e:#}");
-                    // Without the settings app (a bare development build), the file itself.
-                    let file = self.paths.config.join("config.json");
-                    cx.update(|cx| crate::execute::run(Action::OpenPath(file), cx)).ok();
                 }
             }
             Event::Settings(method, params, reply) => {
@@ -389,7 +388,7 @@ impl State {
                 reply(result);
             }
             Event::SettingsClosed => {
-                log::info!("settings app closed");
+                log::info!("settings window closed");
                 self.settings.closed();
                 // A recorder left open when the window closed mustn't leave
                 // the shortcuts off.
@@ -400,7 +399,7 @@ impl State {
             Event::InsertSnippet(id, target) => {
                 let Some(snippet) = self.config.snippets.items.iter().find(|s| s.id == id) else { return };
                 let template = snippet.text.clone();
-                let clipboard = cx.update(|cx| cx.read_from_clipboard().and_then(|i| i.text())).ok().flatten();
+                let clipboard = cx.update(|cx| cx.read_from_clipboard().and_then(|i| i.text()));
                 let rendered = redsnap_core::snippets::render(
                     &template,
                     &redsnap_core::snippets::Context { now: chrono::Local::now(), clipboard },
@@ -425,12 +424,11 @@ impl State {
                 if let Some(t) = &self.tray {
                     t.set_start_at_login(autostart::is_enabled());
                 }
-                self.push_config();
+                self.push_config(cx);
             }
             Event::Cli(CliCommand::Quit) | Event::Tray(TrayCommand::Quit) => {
                 crate::perf::write_summary();
-                self.settings.close();
-                cx.update(|cx| cx.quit()).ok();
+                cx.update(|cx| cx.quit());
             }
         }
     }
@@ -454,8 +452,7 @@ impl State {
                         true
                     }
                 }
-            })
-            .unwrap_or(false);
+            });
         if stored && visible {
             // The store commits on its own thread; look again shortly.
             cx.background_executor().timer(std::time::Duration::from_millis(50)).await;
@@ -470,9 +467,9 @@ impl State {
         let warm: Vec<(ItemId, redsnap_core::item::LaunchTarget)> =
             if warm_icons { self.apps.iter().map(|a| (ItemId::new("app", &a.key), a.launch.clone())).collect() } else { Vec::new() };
         self.catalog.store(Arc::new(built));
-        cx.update(|cx| cx.global::<crate::icons::Icons>().warm(warm)).ok();
+        cx.update(|cx| cx.global::<crate::icons::Icons>().warm(warm));
         self.handle.update(cx, |l, _, cx| l.apps_changed(cx)).ok();
-        self.push_stats();
+        self.push_stats(cx);
     }
 
     fn config_json(&self) -> Value {
@@ -482,8 +479,8 @@ impl State {
         json!({ "config": v, "revision": self.revision })
     }
 
-    fn push_config(&self) {
-        self.settings.push("config.changed", self.config_json());
+    fn push_config(&self, cx: &mut AsyncApp) {
+        self.settings.push(cx, "config.changed", self.config_json());
     }
 
     fn stats(&self) -> Value {
@@ -495,8 +492,8 @@ impl State {
         json!({ "count": self.catalog.load().len(), "lastScanMs": self.scan_ms, "scanning": self.scanning, "apps": apps })
     }
 
-    fn push_stats(&self) {
-        self.settings.push("apps.stats", self.stats());
+    fn push_stats(&self, cx: &mut AsyncApp) {
+        self.settings.push(cx, "apps.stats", self.stats());
     }
 
     /// Requests from the settings app. Everything is validated here; the
@@ -504,7 +501,6 @@ impl State {
     fn settings_request(&mut self, method: &str, params: Value, cx: &mut AsyncApp) -> Result<Value, String> {
         match method {
             "config.get" => Ok(self.config_json()),
-            "settings.shown" => Ok(self.settings.shown()),
             "config.save" => self.save(params, cx),
             "app.info" => Ok(json!({
                 "version": env!("CARGO_PKG_VERSION"),
@@ -529,8 +525,6 @@ impl State {
             "usage.reset" => self.usage.reset().map(|_| json!({})).map_err(err),
             "clipboard.stats" => Ok(cx
                 .update(|cx| cx.try_global::<Clipboard>().map(|c| c.store.history().entries.len()))
-                .ok()
-                .flatten()
                 .map_or(json!({ "available": false }), |n| json!({ "available": true, "entries": n }))),
             "clipboard.clear" => {
                 cx.update(|cx| {
@@ -538,8 +532,7 @@ impl State {
                         c.store.clear();
                         c.store.flush();
                     }
-                })
-                .ok();
+                });
                 Ok(json!({}))
             }
             "logs.open" => open::open_path(&self.paths.logs()).map(|_| json!({})).map_err(err),
@@ -610,9 +603,8 @@ impl State {
                     clip.excluded_apps = c.excluded_apps.iter().map(|a| a.to_lowercase()).collect();
                 });
             }
-        })
-        .ok();
-        self.push_config();
+        });
+        self.push_config(cx);
         Ok(json!({ "revision": self.revision }))
     }
 }

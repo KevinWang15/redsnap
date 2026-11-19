@@ -12,6 +12,14 @@
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+/// A key binding with the platform's command modifier: Cmd on macOS, Ctrl
+/// elsewhere (`secondary!("enter")`).
+macro_rules! secondary {
+    ($key:literal) => {
+        if cfg!(target_os = "macos") { concat!("cmd-", $key) } else { concat!("ctrl-", $key) }
+    };
+}
+
 mod app;
 mod assets;
 mod execute;

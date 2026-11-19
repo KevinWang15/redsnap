@@ -2,9 +2,8 @@
 
 RedSnap is a keyboard launcher for Windows, macOS and Linux. Press a global
 shortcut, type, press Enter. The search window is native (Rust + gpui) because it
-must respond on every keystroke without a visible delay. Everything that is used
-less often and benefits from rich UI (settings, editors, management pages) is an
-Electron app that the native process starts on demand.
+must respond on every keystroke without a visible delay. The settings window is
+gpui too, built from the components of the gpui fork RedSnap uses (§0).
 
 This document has these parts:
 
@@ -22,8 +21,9 @@ This document has these parts:
 
 ## 0. Decisions so far
 
-- **UI toolkit for the search window: gpui, in our own vendored copy.** We patch
-  it where the launcher needs it (§6.1). One codebase covers all three OSes, and
+- **UI toolkit: gpui, from the fork at github.com/KevinWang15/gpui**, pinned
+  by revision in `Cargo.toml`. RedSnap's changes to gpui are commits there
+  (§6.1), so there is one fork to maintain. One codebase covers all three OSes, and
   gpui already handles text shaping, CJK font fallback, IME and per-monitor
   scaling. Writing a native window per OS (Win32 + Direct2D, AppKit, GTK/X11)
   would mean three text fields, lists and focus models.
@@ -35,13 +35,14 @@ This document has these parts:
     Rust behind the `Platform` trait.
 - **Hosting and CI: GitHub**, with GitHub Actions on `ubuntu-latest`,
   `windows-latest` and `macos-latest`. Releases come from `vX.Y.Z` tags.
-- **Everything other than the search window is a web UI** (React + Tailwind,
-  `settings-ui/`), started on demand. Since 2026-11-19 it runs in the **system
-  webview** (`crates/settings-host`, wry: WebView2 / WKWebView / WebKitGTK)
-  instead of Electron: 2 MB installed instead of 310 MB, for about 0.1 s more
-  when opening (measured on Windows: 300–350 ms against about 200 ms). Where
-  this plan still says "Electron", read "the settings app"; the architecture
-  (private channel, native owns config) is unchanged.
+- **The settings window is gpui, in RedSnap's own process** (2026-11-19),
+  built from the fork's components (`gpui::components`). It replaced a web UI
+  (React in Electron, then in the system webview through wry), and with it
+  the separate settings process and its private channel. The window sends the
+  same requests as before (`config.get`, `config.save` with its revision,
+  shortcut suspend/test/resume) over the app's event channel, and the app loop
+  still validates and applies every change. Where this plan still says
+  "Electron" or "the settings app", read "the settings window".
 
 ---
 
@@ -56,8 +57,8 @@ Goals:
 - **Small, explicit design.** One owner per piece of mutable state, typed actions,
   stable ids. Guard trust boundaries (IPC, files we parse); don't wrap every
   internal value in limits.
-- **Native process owns all state.** Electron renders and edits; the native
-  process validates, applies and persists.
+- **The app loop owns all state.** The settings window renders and edits; the
+  app loop validates, applies and persists.
 
 Non-goals for now (each one was expensive and gave little value before):
 
@@ -65,7 +66,6 @@ Non-goals for now (each one was expensive and gave little value before):
   the config dir at a synced folder).
 - Running things as administrator, elevation helpers.
 - Signature/trust checks for plugins, package transaction journals.
-- A native settings UI. Settings is Electron only.
 - Per-field size limits on every internal structure, evidence files checked into
   the repo, OS-specific PowerShell smoke suites. One cross-platform test harness
   instead (§6.3).
@@ -146,7 +146,7 @@ characters: `wx` and `weixin` both find 微信.
   tray and opens Settings on the Shortcut field with the error shown.
 - Crash details appended to `crash.log`; a rotating `redsnap.log`.
 
-### 3.5 Settings (web UI in the system webview)
+### 3.5 Settings (a gpui window)
 
 - **General**: shortcut recorder, start at login, theme, number of rows.
 - **Search**: enable or disable each provider; web searches and quick links
@@ -220,7 +220,6 @@ electron/      RedSnap Settings: Electron + React + TypeScript + Vite
 shared/
   theme/tokens.json        one color/spacing source for gpui and CSS
   protocol/fixtures/*.json messages both sides must parse (round-trip tests)
-third_party/gpui           vendored gpui 0.2.2 with documented patches (PATCHES.md)
 packaging/                 icons (svg master → png/ico/icns), Info.plist,
                            .desktop file
 scripts/                   build-<os>, package-<os>, regen-shaders, demo harness
@@ -649,26 +648,25 @@ keystroke. The risk is gpui's frame cost, which M0 measures against them.
 - Strict decoding: `deny_unknown_fields` everywhere. JSON with duplicate keys is
   rejected (serde normally takes the last one silently).
 
-### 5.14 Settings app details
+### 5.14 Settings window details
 
-- `crates/settings-host` (`redsnap-settings`) shows `settings-ui/dist` in the
-  system webview. The UI is served through a private scheme
-  (`http://redsnap.localhost` on Windows, `redsnap://localhost` elsewhere);
-  navigation elsewhere and new windows are refused.
-- The page gets `window.redsnap` (`call`, `onEvent`, `platform`) from an
-  initialization script; calls go through `window.ipc.postMessage`, are
-  checked against an allow-list in Rust, and are forwarded on RedSnap's
-  private channel.
-- The window stays hidden until the page has loaded, on the app's own
-  background color, so it never flashes white.
-- The webview's own data goes under RedSnap's data folder
-  (`REDSNAP_SETTINGS_DATA`), never next to the executable.
-- Windows needs the WebView2 runtime (part of Windows 11 and current
-  Windows 10); Linux needs WebKitGTK 4.1.
+- `crates/app/src/settings/`: `mod.rs` opens or focuses the window and sends
+  requests to the app loop (`Event::Settings`, answered with a `Reply`);
+  `view.rs` is the window (painted title bar, page list, notice); `pages.rs`
+  the pages; `widgets.rs` the shortcut format.
+- Text fields are bound to the config: each knows how to read its value and
+  write it back. They save on Enter or when they lose focus, and a change
+  made elsewhere updates every field that isn't being edited.
+- The title bar is painted. Its areas are gpui window-control areas, so on
+  Windows the OS handles dragging, snapping, minimize, maximize and close;
+  elsewhere clicks do it. macOS keeps its traffic lights.
+- The shortcut recorder suspends RedSnap's shortcuts while it listens, tests
+  the new one (registered for real) before saving it, and resumes them when
+  it stops or the window closes.
 
 ### 5.15 Shutdown and test switches
 
-- Quit: stop accepting IPC, unregister hotkeys, tell Electron to quit, and give
+- Quit: stop accepting IPC, unregister hotkeys, close the settings window, and give
   each background owner a bounded join (500 ms). A worker blocked in a scan must
   not hang quit; scans check a stop flag between directory entries.
 - Test-only environment switches (demo catalog, fake platform, fixed clock) exist
@@ -679,24 +677,25 @@ keystroke. The risk is gpui's frame cost, which M0 measures against them.
 
 ## 6. Build, packaging and testing
 
-### 6.1 gpui vendoring
+### 6.1 gpui fork
 
-Vendor gpui 0.2.2 in `third_party/gpui`, macOS support kept, with each patch listed
-in `third_party/gpui/PATCHES.md`:
+RedSnap uses the gpui fork at github.com/KevinWang15/gpui (`gpui` and
+`gpui_platform`, with the `x11` and `wayland` features), pinned by revision.
+RedSnap's own changes are commits in that fork:
 
 1. Windows `PopUp` windows use `WS_POPUP` and skip the non-client insets in
-   `WM_NCCALCSIZE`. Upstream frames them, so content draws short.
+   `WM_NCCALCSIZE`. Style 0 is `WS_OVERLAPPED`, which Windows frames, so the
+   content drew short of the window.
 2. Report a mouse move on `WM_MOUSELEAVE` so hover states clear.
-3. Build script uses `CARGO_CFG_TARGET_OS` instead of `cfg(target_os)` so cross
-   builds take the right path. Committed precompiled HLSL shaders, guarded by a
-   hash of the `.hlsl` sources.
-4. `Window::set_visible(bool)`, so hiding and showing go through gpui's own window
-   state instead of around it.
-5. "Paint, then reveal": render one frame synchronously while the window is still
-   hidden from the compositor (DWM cloak on Windows, alpha 0 on macOS), then make
-   it visible. The first visible frame is then always complete and current.
+3. A hidden window gets its bounds at creation, so a pre-created window the app
+   placed itself doesn't jump back on its first `activate()`.
+4. `CursorStyle::ClosedHand` shows Windows' move cursor.
+5. `PRESENT_HOOK`: called after each presented frame, for latency measurement.
+6. `gpui_windows`' build script follows the target, not the host, and release
+   builds use precompiled HLSL shaders committed in `src/shaders_bytes.rs`,
+   guarded by a hash of the `.hlsl` sources, so a Linux cross build needs no
+   `fxc.exe`.
 
-Also patch `xattr` 0.2.3, which fails to build on Linux against current libc.
 
 ### 6.2 Per-OS builds
 

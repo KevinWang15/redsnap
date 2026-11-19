@@ -42,16 +42,15 @@ about 1.25× scale, so measurements from it are divided by 1.25.
   SVG layers over the same box so they stay centered on each other at any
   display scale.
 - Icons are [Lucide](https://lucide.dev) (ISC), compiled into the binary
-  (`crates/app/assets/icons`) and tinted with the text color; the settings app
-  uses the same set through `lucide-react`.
-- The settings window has no system title bar (2026-11-19). The page paints a
-  38 px bar: the mark, "RedSnap Settings", and Lucide minimize,
-  maximize/restore and close buttons (46 px wide, close turns `#e81123` on
-  hover). Dragging the bar moves the window and double-clicking it maximizes.
-  Windows 11 keeps the shadow and rounded corners and resizes from the shadow
-  frame. The page adds a top resize strip on Windows and strips on every edge
-  on Linux. macOS keeps its traffic lights over a transparent bar instead of
-  our buttons.
+  (`crates/app/assets/icons`) and tinted with the text color; the settings
+  window uses the same set from the gpui fork (`gpui::icons`).
+- The settings window (a gpui window, 2026-11-19) uses the fork's dark theme
+  with RedSnap's red as the accent. It has no system title bar: it paints a
+  38 px bar with the mark, "RedSnap Settings", and minimize, maximize/restore
+  and close buttons (46 px wide; close turns `#e81123` on hover). The bar's
+  areas are gpui window-control areas, so on Windows the OS drags, snaps,
+  minimizes, maximizes and closes. macOS keeps its traffic lights over the bar
+  instead of our buttons.
 
 ## Results
 

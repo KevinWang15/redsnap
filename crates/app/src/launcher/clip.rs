@@ -106,7 +106,7 @@ impl Scroller {
                 let max = (total - view.size.height).max(px(0.));
                 (view, max, y.min(max))
             }
-            Scroller::Handle(h) => (h.bounds(), h.max_offset().height, -h.offset().y),
+            Scroller::Handle(h) => (h.bounds(), h.max_offset().y, -h.offset().y),
         }
     }
 
@@ -345,7 +345,7 @@ impl Launcher {
         }
         let s = &self.clip.scroll;
         let page = s.bounds().size.height * 0.9;
-        let max = s.max_offset().height;
+        let max = s.max_offset().y;
         let y = s.offset().y + if down { -page } else { page };
         s.set_offset(point(px(0.), y.clamp(-max, px(0.))));
         cx.notify();
