@@ -1145,6 +1145,9 @@ struct WindowOpenStatus {
 enum WindowOpenState {
     Maximized,
     Fullscreen,
+    // redsnap patch: no longer constructed (hidden windows get their bounds at
+    // creation); kept so set_window_placement still reads as upstream.
+    #[allow(dead_code)]
     Windowed,
 }
 

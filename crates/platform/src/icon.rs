@@ -44,10 +44,10 @@ pub fn logo_rgba(size: u32) -> Vec<u8> {
                     }
                 }
             }
-            if hits > 0 {
+            if let Some(avg) = rgb.iter().map(|c| c.checked_div(hits)).collect::<Option<Vec<u32>>>() {
                 let o = ((py * size + px) * 4) as usize;
                 for i in 0..3 {
-                    out[o + i] = (rgb[i] / hits) as u8;
+                    out[o + i] = avg[i] as u8;
                 }
                 out[o + 3] = (hits * 255 / 16) as u8;
             }
