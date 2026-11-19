@@ -120,7 +120,7 @@ mod windows {
             GetMonitorInfoW(mon, &mut info);
             let w = info.rcWork;
             // The window's DPI is the one it was last on; good enough for a
-            // spike (the real app re-places on WM_DPICHANGED).
+            // first show; re-placing on WM_DPICHANGED is still to do.
             let s = scale(n);
             let (pw, ph) = ((size.0 * s) as i32, (size.1 * s) as i32);
             Placement { x: w.left + (w.right - w.left - pw) / 2, y: w.top + (w.bottom - w.top - ph) / 5 }

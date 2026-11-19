@@ -37,15 +37,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --locked
       # Release builds use the committed precompiled shaders (no fxc needed).
-      - run: cargo build --release --locked -p redsnap -p redsnap-spike
+      - run: cargo build --release --locked -p redsnap
       - uses: actions/upload-artifact@v4
         with:
           name: redsnap-windows
           path: target/release/redsnap.exe
 
-  # The M0 latency spike on macOS: build, then let it drive itself for a few
-  # shows and keystrokes and keep the measurements as an artifact.
-  macos-spike:
+  macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,19 +54,4 @@ jobs:
       - name: Ensure Metal toolchain
         run: xcrun -sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
       - run: cargo test --workspace --locked
-      - run: cargo build --release --locked -p redsnap-spike
-      - name: Latency bench
-        run: |
-          mkdir -p out
-          set +e
-          for mode in stock now; do
-            perl -e 'alarm shift; exec @ARGV' 300 \
-              ./target/release/redsnap-spike --bench=15 --paint=$mode --perf=out/bench-macos-$mode.jsonl
-            echo "exit status for $mode: $?"
-            cat out/bench-macos-$mode.summary.txt || echo "no summary for $mode"
-          done
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: spike-macos
-          path: out/
+      - run: cargo build --release --locked -p redsnap

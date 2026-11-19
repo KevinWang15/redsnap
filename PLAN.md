@@ -744,7 +744,25 @@ Also patch `xattr` 0.2.3, which fails to build on Linux against current libc.
 Risky spikes come first, so a dead end is found before the bulk of the code exists.
 A spike is a short experiment with throwaway code that answers one question.
 
-**M0 latency spike, concretely:**
+**M0 result (2026-11-19): passed.** The spike code has been removed; what it
+proved is in the app. On Windows 11 (Intel iGPU):
+
+| | p50 | p95 |
+|---|---|---|
+| hotkey → frame presented | 1.4 ms | 5.8 ms |
+| keystroke → results frame, painting right after input | 0.8 ms | 3.6 ms |
+| keystroke → results frame, stock gpui (next vsync tick) | 6.3 ms | 9.8 ms |
+| gpui layout + paint | 0.5 ms | 1.0 ms |
+
+Findings that shaped the app: stock gpui paints only on its vsync tick, so the
+app paints right after input; Windows sends no `WM_PAINT` to cloaked or
+off-screen windows; gpui's Windows `activate()` replays creation bounds and
+injects a fake Alt keypress (the app takes the foreground itself); the matte
+glass's screen capture costs 9–13 ms on Windows. Chinese IME input worked.
+Still open: a macOS latency measurement (the CI bench stalled after a few
+shows).
+
+**M0 latency spike, as planned:**
 
 - A minimal app: vendored gpui 0.2.2 with patches 1–5 (§6.1), one pre-created
   hidden search window drawn to docs/design.md (glass included), a global

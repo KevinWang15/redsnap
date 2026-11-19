@@ -4758,25 +4758,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "redsnap-spike"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "env_logger",
- "futures",
- "global-hotkey",
- "gpui",
- "image",
- "log",
- "nucleo-matcher",
- "objc2-foundation",
- "raw-window-handle",
- "smallvec",
- "windows-sys 0.61.2",
- "x11rb",
-]
-
-[[package]]
 name = "ref-cast"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -16,7 +16,7 @@ about 1.25× scale, so measurements from it are divided by 1.25.
 - The capture takes 9–13 ms on Windows (GDI waits for composition). By default
   the window waits for it and opens finished, so hotkey to frame is about
   12–17 ms instead of about 2 ms.
-- Optional (`--matte-async` in the spike, a setting later): show at once with
+- Optional (a setting, not built yet): show at once with
   an opaque fill while excluded from captures (`WDA_EXCLUDEFROMCAPTURE`), capture
   in the background, then fade the fill to 0.8 over 100 ms. It opens faster but
   the fade reads as a background flash, so it is off by default. The exclusion

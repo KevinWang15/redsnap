@@ -215,7 +215,7 @@ impl Launcher {
     }
 
     /// Paint as soon as this update returns instead of on gpui's next vsync
-    /// tick (the spike's paint-now mode).
+    /// tick (PLAN.md §7: measured 0.8 ms vs 6.3 ms per keystroke).
     fn paint_soon(&self, cx: &mut Context<Self>) {
         if os::CAN_PAINT_NOW
             && let Some(n) = self.native
