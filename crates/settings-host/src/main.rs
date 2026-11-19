@@ -58,6 +58,8 @@ enum Ui {
     Loaded,
     /// The page has painted (or a second has passed since it loaded).
     Painted,
+    /// The painted title bar asked for something: drag, resize, minimize…
+    Window(String, String),
     /// The channel closed: RedSnap is gone.
     Closed,
 }
@@ -97,6 +99,14 @@ fn bridge_script() -> String {
     }}),
     onEvent: (cb) => {{ listeners.add(cb); return () => listeners.delete(cb); }},
     platform: {platform:?},
+    // The painted title bar: these act on the native window.
+    window: Object.freeze({{
+      drag: () => window.ipc.postMessage(JSON.stringify({{ window: 'drag' }})),
+      resize: (dir) => window.ipc.postMessage(JSON.stringify({{ window: 'resize', dir }})),
+      minimize: () => window.ipc.postMessage(JSON.stringify({{ window: 'minimize' }})),
+      toggleMaximize: () => window.ipc.postMessage(JSON.stringify({{ window: 'toggleMaximize' }})),
+      close: () => window.ipc.postMessage(JSON.stringify({{ window: 'close' }})),
+    }}),
   }});
   // Tell the host once the page has painted (two frames after load), so it
   // shows the window with content instead of an empty one.
@@ -253,6 +263,15 @@ fn cloak(window: &tao::window::Window, on: bool) {
 #[cfg(not(windows))]
 fn cloak(_: &tao::window::Window, _: bool) {}
 
+/// Windows 11 rounds framed windows on its own; a frameless one asks.
+#[cfg(windows)]
+fn round_corners(window: &tao::window::Window) {
+    use tao::platform::windows::WindowExtWindows;
+    use windows_sys::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
+    let value: i32 = DWMWCP_ROUND;
+    unsafe { DwmSetWindowAttribute(window.hwnd() as _, DWMWA_WINDOW_CORNER_PREFERENCE as u32, (&value as *const i32).cast(), 4) };
+}
+
 fn main() {
     if let Err(e) = run() {
         // No console in release builds on Windows: say it in a log and a dialog.
@@ -272,7 +291,22 @@ fn run() -> Result<()> {
     let proxy = event_loop.create_proxy();
     let channel = connect(proxy.clone())?;
 
-    let window = WindowBuilder::new()
+    // No system title bar: the page paints its own (docs/design.md). macOS
+    // keeps its traffic lights over a transparent bar.
+    let builder = WindowBuilder::new();
+    #[cfg(target_os = "macos")]
+    let builder = {
+        use tao::platform::macos::WindowBuilderExtMacOS;
+        builder.with_titlebar_transparent(true).with_title_hidden(true).with_fullsize_content_view(true)
+    };
+    #[cfg(windows)]
+    let builder = {
+        use tao::platform::windows::WindowBuilderExtWindows;
+        builder.with_decorations(false).with_undecorated_shadow(true)
+    };
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let builder = builder.with_decorations(false);
+    let window = builder
         .with_title("RedSnap Settings")
         .with_inner_size(tao::dpi::LogicalSize::new(980.0, 700.0))
         .with_min_inner_size(tao::dpi::LogicalSize::new(780.0, 540.0))
@@ -283,6 +317,8 @@ fn run() -> Result<()> {
         .with_background_color((13, 16, 23, 255))
         .build(&event_loop)?;
 
+    #[cfg(windows)]
+    round_corners(&window);
     let root = web_root();
     if !root.join("index.html").exists() {
         bail!("the settings UI is missing ({} has no index.html)", root.display());
@@ -318,6 +354,11 @@ fn run() -> Result<()> {
                 let _ = proxy.send_event(Ui::Painted);
                 return;
             }
+            if let Some(op) = msg["window"].as_str() {
+                let dir = msg["dir"].as_str().unwrap_or("").to_string();
+                let _ = proxy.send_event(Ui::Window(op.to_string(), dir));
+                return;
+            }
             let (id, method) = (msg["id"].clone(), msg["method"].as_str().unwrap_or("").to_string());
             if !ALLOWED.contains(&method.as_str()) {
                 let _ = proxy.send_event(Ui::FromRedSnap(json!({ "id": id, "error": format!("not allowed: {method}") })));
@@ -342,6 +383,7 @@ fn run() -> Result<()> {
     // doesn't display it, but the webview paints) and uncloaked once the page
     // has painted. Elsewhere it's shown when the page has loaded.
     let mut stage = Stage::Hidden;
+    let mut last_maximized = false;
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
@@ -367,6 +409,42 @@ fn run() -> Result<()> {
                 stage = Stage::Shown;
             }
             Event::UserEvent(Ui::Loaded | Ui::Painted) => {}
+            Event::UserEvent(Ui::Window(op, dir)) => match op.as_str() {
+                "drag" => {
+                    let _ = window.drag_window();
+                }
+                "resize" => {
+                    use tao::window::ResizeDirection as R;
+                    let d = match dir.as_str() {
+                        "n" => R::North,
+                        "s" => R::South,
+                        "e" => R::East,
+                        "w" => R::West,
+                        "ne" => R::NorthEast,
+                        "nw" => R::NorthWest,
+                        "se" => R::SouthEast,
+                        "sw" => R::SouthWest,
+                        _ => return,
+                    };
+                    let _ = window.drag_resize_window(d);
+                }
+                "minimize" => window.set_minimized(true),
+                "toggleMaximize" => window.set_maximized(!window.is_maximized()),
+                "close" => {
+                    window.set_visible(false);
+                    *control_flow = ControlFlow::Exit;
+                }
+                _ => {}
+            },
+            Event::WindowEvent { event: WindowEvent::Resized(_), .. } => {
+                // The title bar shows maximize or restore.
+                let maximized = window.is_maximized();
+                if maximized != last_maximized {
+                    last_maximized = maximized;
+                    let msg = json!({ "event": "window", "params": { "maximized": maximized } });
+                    let _ = webview.evaluate_script(&format!("window.__redsnapReceive({msg})"));
+                }
+            }
             Event::UserEvent(Ui::FromRedSnap(msg)) => {
                 if msg["event"] == "focus" {
                     window.set_visible(true);

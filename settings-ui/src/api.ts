@@ -50,7 +50,16 @@ type Bridge = {
   call: (method: string, params?: unknown) => Promise<unknown>
   onEvent: (cb: (name: string, params: unknown) => void) => () => void
   platform: string
+  window: {
+    drag: () => void
+    resize: (dir: ResizeDir) => void
+    minimize: () => void
+    toggleMaximize: () => void
+    close: () => void
+  }
 }
+
+export type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
 
 declare global {
   interface Window {
@@ -64,6 +73,7 @@ function bridge(): Bridge {
 }
 
 export const isMac = () => window.redsnap?.platform === 'darwin'
+export const isWindows = () => window.redsnap?.platform === 'win32'
 
 export const api = {
   getConfig: () => bridge().call('config.get') as Promise<Snapshot>,
@@ -81,6 +91,7 @@ export const api = {
   openLogs: () => bridge().call('logs.open'),
   openData: () => bridge().call('data.open'),
   onEvent: (cb: (name: string, params: unknown) => void) => bridge().onEvent(cb),
+  window: () => bridge().window,
 }
 
 /** Errors from RedSnap arrive as "Error invoking remote method ...: Error: <message>". */
