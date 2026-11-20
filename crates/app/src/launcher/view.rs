@@ -202,6 +202,10 @@ impl Render for Launcher {
             .on_action(cx.listener(Self::copy_entry))
             .on_action(cx.listener(Self::toggle_pin))
             .on_action(cx.listener(Self::delete_entry))
+            // The query field keeps focus: a press on a row or on blank
+            // space would otherwise blur it (gpui's mouse down default), and
+            // the launcher's keys go through the field.
+            .on_any_mouse_down(|_, window, _| window.prevent_default())
             .on_mouse_move(cx.listener(Self::clip_drag_move))
             .on_mouse_up(gpui::MouseButton::Left, cx.listener(Self::clip_drag_end))
             .on_mouse_up_out(gpui::MouseButton::Left, cx.listener(Self::clip_drag_end))
