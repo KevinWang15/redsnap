@@ -21,13 +21,6 @@ pub fn native(window: &dyn HasWindowHandle) -> Option<Native> {
     }
 }
 
-/// Where to put the window: top-left in physical pixels.
-#[derive(Clone, Copy, Debug)]
-pub struct Placement {
-    pub x: i32,
-    pub y: i32,
-}
-
 /// How the search window looks on this OS (docs/design.md).
 #[derive(Clone, Copy, Debug)]
 pub struct Look {
@@ -45,19 +38,20 @@ pub use windows::*;
 
 #[cfg(target_os = "windows")]
 mod windows {
-    use super::{Look, Native, Placement};
-    use windows_sys::Win32::Foundation::{HWND, POINT};
+    use super::{Look, Native};
+    use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
     use windows_sys::Win32::Graphics::Dwm::{
         DWMWA_BORDER_COLOR, DWMWA_CLOAK, DWMWA_COLOR_NONE, DWMWA_USE_IMMERSIVE_DARK_MODE,
         DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
     };
     use windows_sys::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, MonitorFromWindow,
     };
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetCursorPos, HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOSIZE,
-        SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, WM_PAINT,
+        GetCursorPos, HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER,
+        SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, USER_DEFAULT_SCREEN_DPI,
+        WM_PAINT,
     };
 
     fn hwnd(n: Native) -> HWND {
@@ -103,44 +97,89 @@ mod windows {
         }
     }
 
-    pub fn scale(n: Native) -> f32 {
-        unsafe { GetDpiForWindow(hwnd(n)) as f32 / 96.0 }
-    }
-
-    /// Centered horizontally on the monitor under the cursor, a fifth of the
-    /// way down its work area. `size` is in logical pixels.
-    pub fn placement_at_cursor(n: Native, size: (f32, f32)) -> Placement {
-        unsafe {
-            let mut p = POINT { x: 0, y: 0 };
-            GetCursorPos(&mut p);
-            let mon = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
-            let mut info: MONITORINFO = std::mem::zeroed();
-            info.cbSize = size_of::<MONITORINFO>() as u32;
-            GetMonitorInfoW(mon, &mut info);
-            let w = info.rcWork;
-            // The window's DPI is the one it was last on; good enough for a
-            // first show; re-placing on WM_DPICHANGED is still to do.
-            let s = scale(n);
-            let (pw, ph) = ((size.0 * s) as i32, (size.1 * s) as i32);
-            Placement {
-                x: w.left + (w.right - w.left - pw) / 2,
-                y: w.top + (w.bottom - w.top - ph) / 5,
-            }
+    fn launcher_rect(work: RECT, size: (f32, f32), dpi: u32) -> RECT {
+        let scale = dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
+        let width = (size.0 * scale).round() as i32;
+        let height = (size.1 * scale).round() as i32;
+        let left = work.left + (work.right - work.left - width) / 2;
+        let top = work.top + (work.bottom - work.top - height) / 5;
+        RECT {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
         }
     }
 
-    pub fn place(n: Native, at: Placement) {
-        unsafe {
-            SetWindowPos(
-                hwnd(n),
-                HWND_TOPMOST,
-                at.x,
-                at.y,
-                0,
-                0,
-                SWP_NOSIZE | SWP_NOACTIVATE,
-            )
+    #[test]
+    fn positions_the_scaled_popup_in_the_monitor_work_area() {
+        let work = RECT {
+            left: -1920,
+            top: 40,
+            right: 0,
+            bottom: 1080,
         };
+        for (dpi, width, height, left, top) in [
+            (96, 760, 474, -1340, 153),
+            (120, 950, 593, -1435, 129),
+            (144, 1140, 711, -1530, 105),
+        ] {
+            let r = launcher_rect(work, (760., 474.), dpi);
+            assert_eq!((r.left, r.top), (left, top));
+            assert_eq!((r.right - r.left, r.bottom - r.top), (width, height));
+        }
+    }
+
+    /// Apply the logical size of the borderless popup on every show, including
+    /// when Windows has changed the display scale while the window was hidden.
+    pub fn place_at_cursor(n: Native, size: (f32, f32)) {
+        let h = hwnd(n);
+        unsafe {
+            let mut p = POINT::default();
+            if GetCursorPos(&mut p) == 0 {
+                return;
+            }
+            let mon = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
+            let mut info = MONITORINFO {
+                cbSize: size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            if GetMonitorInfoW(mon, &mut info) == 0 {
+                return;
+            }
+            let work = info.rcWork;
+            if MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) != mon {
+                // Move entirely onto the destination while cloaked. GPUI handles
+                // WM_DPICHANGED synchronously and may apply Windows' suggested
+                // rectangle during this move. Read the new DPI after it returns.
+                if SetWindowPos(
+                    h,
+                    std::ptr::null_mut(),
+                    work.left,
+                    work.top,
+                    (size.0 as i32).min(work.right - work.left),
+                    (size.1 as i32).min(work.bottom - work.top),
+                    SWP_NOACTIVATE | SWP_NOZORDER,
+                ) == 0
+                {
+                    return;
+                }
+            }
+            let dpi = GetDpiForWindow(h);
+            if dpi == 0 {
+                return;
+            }
+            let rect = launcher_rect(work, size, dpi);
+            SetWindowPos(
+                h,
+                HWND_TOPMOST,
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+                SWP_NOACTIVATE,
+            );
+        }
     }
 
     pub fn set_cloaked(n: Native, cloaked: bool) {
@@ -186,7 +225,7 @@ mod linux {
     use x11rb::protocol::xproto::{ConfigureWindowAux, ConnectionExt, InputFocus, StackMode};
     use x11rb::rust_connection::RustConnection;
 
-    use super::{Look, Native, Placement};
+    use super::{Look, Native};
 
     fn conn() -> Option<&'static (RustConnection, usize)> {
         static CONN: OnceLock<Option<(RustConnection, usize)>> = OnceLock::new();
@@ -208,27 +247,18 @@ mod linux {
 
     pub fn setup(_: Native) {}
 
-    pub fn placement_at_cursor(_: Native, size: (f32, f32)) -> Placement {
+    pub fn place_at_cursor(n: Native, size: (f32, f32)) {
         let Some((c, screen)) = conn() else {
-            return Placement { x: 0, y: 0 };
+            return;
         };
         let s = &c.setup().roots[*screen];
         let (w, h) = (s.width_in_pixels as i32, s.height_in_pixels as i32);
-        Placement {
-            x: (w - size.0 as i32) / 2,
-            y: (h - size.1 as i32) / 5,
-        }
-    }
-
-    pub fn place(n: Native, at: Placement) {
-        if let Some((c, _)) = conn() {
-            let aux = ConfigureWindowAux::new()
-                .x(at.x)
-                .y(at.y)
-                .stack_mode(StackMode::ABOVE);
-            let _ = c.configure_window(n.0 as u32, &aux);
-            let _ = c.flush();
-        }
+        let aux = ConfigureWindowAux::new()
+            .x((w - size.0 as i32) / 2)
+            .y((h - size.1 as i32) / 5)
+            .stack_mode(StackMode::ABOVE);
+        let _ = c.configure_window(n.0 as u32, &aux);
+        let _ = c.flush();
     }
 
     pub fn set_cloaked(_: Native, _: bool) {}
@@ -266,7 +296,7 @@ pub use macos::*;
 mod macos {
     //! macOS goes through gpui's app-level calls (see launcher.rs); these are
     //! no-ops so the shared code compiles.
-    use super::{Look, Native, Placement};
+    use super::{Look, Native};
 
     /// Opts out of App Nap, which throttles a hidden app's timers (the bench
     /// waits between steps would stretch from milliseconds to seconds). The
@@ -291,10 +321,7 @@ mod macos {
     };
 
     pub fn setup(_: Native) {}
-    pub fn placement_at_cursor(_: Native, _: (f32, f32)) -> Placement {
-        Placement { x: 0, y: 0 }
-    }
-    pub fn place(_: Native, _: Placement) {}
+    pub fn place_at_cursor(_: Native, _: (f32, f32)) {}
     pub fn set_cloaked(_: Native, _: bool) {}
     pub fn show(_: Native) {}
     pub fn hide(_: Native) {}

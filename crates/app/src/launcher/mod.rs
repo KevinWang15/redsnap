@@ -591,8 +591,8 @@ pub async fn show(
     }
     let Some(n) = native else { return };
     log::debug!("show");
-    os::place(n, os::placement_at_cursor(n, (WIDTH, height(opts.rows))));
     os::set_cloaked(n, true);
+    os::place_at_cursor(n, (WIDTH, height(opts.rows)));
     os::show(n);
     os::paint_now(n);
     os::set_cloaked(n, false);
