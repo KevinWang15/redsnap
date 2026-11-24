@@ -45,13 +45,34 @@ jobs:
 
   macos:
     runs-on: macos-latest
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       # gpui compiles its Metal shaders at build time; newer Xcode versions ship
       # the Metal toolchain as a separate download.
       - name: Ensure Metal toolchain
-        run: xcrun -sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
+        run: |
+          if ! xcrun -sdk macosx metal --version; then
+            xcodebuild -downloadComponent MetalToolchain
+            xcrun -sdk macosx metal --version
+          fi
       - run: cargo test --workspace --locked
-      - run: cargo build --release --locked -p redsnap
+      - name: Build universal release binary
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin -p redsnap
+          cargo build --release --locked --target x86_64-apple-darwin -p redsnap
+      - name: Package RedSnap.app
+        run: |
+          packaging/macos/package.sh target/macos-bundle \
+            target/aarch64-apple-darwin/release/redsnap \
+            target/x86_64-apple-darwin/release/redsnap
+      - uses: actions/upload-artifact@v4
+        with:
+          name: redsnap-macos
+          path: target/macos-bundle/RedSnap-macos.zip
+          compression-level: 0

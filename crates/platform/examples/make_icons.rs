@@ -1,7 +1,11 @@
-//! Writes packaging/icons/: redsnap.ico (16–256 px) and PNGs of the app icon.
-//! `cargo run -p redsnap-platform --example make_icons`
+//! Writes packaging/icons/: redsnap.ico (16–256 px), redsnap.icns (16–1024 px),
+//! and PNGs of the app icon.
+//! `cargo run --release -p redsnap-platform --example make_icons`
 
+use std::fs::File;
 use std::path::Path;
+
+use icns::{IconFamily, IconType, Image, PixelFormat};
 
 fn main() -> anyhow::Result<()> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packaging/icons");
@@ -34,6 +38,34 @@ fn main() -> anyhow::Result<()> {
         ico.extend_from_slice(png);
     }
     std::fs::write(dir.join("redsnap.ico"), ico)?;
+
+    // ICNS for the macOS RedSnap.app bundle (1x and 2x Retina slots).
+    let mut family = IconFamily::new();
+    let slots: &[(u32, &[IconType])] = &[
+        (16, &[IconType::RGBA32_16x16]),
+        (32, &[IconType::RGBA32_16x16_2x, IconType::RGBA32_32x32]),
+        (64, &[IconType::RGBA32_32x32_2x]),
+        (128, &[IconType::RGBA32_128x128]),
+        (
+            256,
+            &[IconType::RGBA32_128x128_2x, IconType::RGBA32_256x256],
+        ),
+        (
+            512,
+            &[IconType::RGBA32_256x256_2x, IconType::RGBA32_512x512],
+        ),
+        (1024, &[IconType::RGBA32_512x512_2x]),
+    ];
+    for &(size, types) in slots {
+        let rgba = redsnap_platform::icon::app_icon_rgba(size);
+        let img = Image::from_data(PixelFormat::RGBA, size, size, rgba)?;
+        for &kind in types {
+            family.add_icon_with_type(&img, kind)?;
+        }
+    }
+    let mut icns_file = File::create(dir.join("redsnap.icns"))?;
+    family.write(&mut icns_file)?;
+
     println!("wrote {}", dir.display());
     Ok(())
 }
