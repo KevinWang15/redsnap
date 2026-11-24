@@ -26,8 +26,14 @@ actions!(
         Delete,
         Left,
         Right,
+        WordLeft,
+        WordRight,
         SelectLeft,
         SelectRight,
+        SelectWordLeft,
+        SelectWordRight,
+        SelectToStart,
+        SelectToEnd,
         SelectAll,
         Home,
         End,
@@ -47,10 +53,34 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("delete", Delete, c),
         KeyBinding::new("left", Left, c),
         KeyBinding::new("right", Right, c),
+        KeyBinding::new("alt-left", WordLeft, c),
+        KeyBinding::new("alt-right", WordRight, c),
+        KeyBinding::new("ctrl-left", WordLeft, c),
+        KeyBinding::new("ctrl-right", WordRight, c),
         KeyBinding::new("shift-left", SelectLeft, c),
         KeyBinding::new("shift-right", SelectRight, c),
+        KeyBinding::new("alt-shift-left", SelectWordLeft, c),
+        KeyBinding::new("alt-shift-right", SelectWordRight, c),
+        KeyBinding::new("ctrl-shift-left", SelectWordLeft, c),
+        KeyBinding::new("ctrl-shift-right", SelectWordRight, c),
+        KeyBinding::new("shift-home", SelectToStart, c),
+        KeyBinding::new("shift-end", SelectToEnd, c),
+        KeyBinding::new("shift-up", SelectToStart, c),
+        KeyBinding::new("shift-down", SelectToEnd, c),
+        KeyBinding::new("cmd-shift-left", SelectToStart, c),
+        KeyBinding::new("cmd-shift-right", SelectToEnd, c),
+        KeyBinding::new("cmd-shift-up", SelectToStart, c),
+        KeyBinding::new("cmd-shift-down", SelectToEnd, c),
+        KeyBinding::new("ctrl-shift-home", SelectToStart, c),
+        KeyBinding::new("ctrl-shift-end", SelectToEnd, c),
         KeyBinding::new("home", Home, c),
         KeyBinding::new("end", End, c),
+        KeyBinding::new("cmd-left", Home, c),
+        KeyBinding::new("cmd-right", End, c),
+        KeyBinding::new("cmd-up", Home, c),
+        KeyBinding::new("cmd-down", End, c),
+        KeyBinding::new("ctrl-home", Home, c),
+        KeyBinding::new("ctrl-end", End, c),
         KeyBinding::new(secondary!("a"), SelectAll, c),
         KeyBinding::new(secondary!("v"), Paste, c),
         KeyBinding::new(secondary!("x"), Cut, c),
@@ -74,6 +104,7 @@ pub struct QueryField {
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
     selecting: bool,
+    was_focused: bool,
 }
 
 impl EventEmitter<QueryChanged> for QueryField {}
@@ -91,6 +122,7 @@ impl QueryField {
             last_layout: None,
             last_bounds: None,
             selecting: false,
+            was_focused: false,
         }
     }
 
@@ -203,6 +235,43 @@ impl QueryField {
             .map_or(offset, |c| offset + c.len_utf8())
     }
 
+    fn previous_word_boundary(&self, offset: usize) -> usize {
+        let slice = &self.content[..self.clamp(offset)];
+        let mut iter = slice.char_indices().rev().peekable();
+        while let Some(&(_, ch)) = iter.peek() {
+            if !(ch.is_alphanumeric() || ch == '_') {
+                iter.next();
+            } else {
+                break;
+            }
+        }
+        for (idx, ch) in iter {
+            if !(ch.is_alphanumeric() || ch == '_') {
+                return idx + ch.len_utf8();
+            }
+        }
+        0
+    }
+
+    fn next_word_boundary(&self, offset: usize) -> usize {
+        let start = self.clamp(offset);
+        let slice = &self.content[start..];
+        let mut iter = slice.char_indices().peekable();
+        while let Some(&(_, ch)) = iter.peek() {
+            if !(ch.is_alphanumeric() || ch == '_') {
+                iter.next();
+            } else {
+                break;
+            }
+        }
+        for (idx, ch) in iter {
+            if !(ch.is_alphanumeric() || ch == '_') {
+                return start + idx;
+            }
+        }
+        self.content.len()
+    }
+
     fn cursor(&self) -> usize {
         if self.reversed {
             self.selected.start
@@ -229,6 +298,8 @@ impl QueryField {
         if self.selected.end < self.selected.start {
             self.reversed = !self.reversed;
             self.selected = self.selected.end..self.selected.start;
+        } else if self.selected.is_empty() {
+            self.reversed = false;
         }
         cx.notify();
     }
@@ -264,12 +335,36 @@ impl QueryField {
         self.move_to(to, cx);
     }
 
+    fn word_left(&mut self, _: &WordLeft, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_to(self.previous_word_boundary(self.cursor()), cx);
+    }
+
+    fn word_right(&mut self, _: &WordRight, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_to(self.next_word_boundary(self.cursor()), cx);
+    }
+
     fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(self.previous_boundary(self.cursor()), cx);
     }
 
     fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(self.next_boundary(self.cursor()), cx);
+    }
+
+    fn select_word_left(&mut self, _: &SelectWordLeft, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_to(self.previous_word_boundary(self.cursor()), cx);
+    }
+
+    fn select_word_right(&mut self, _: &SelectWordRight, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_to(self.next_word_boundary(self.cursor()), cx);
+    }
+
+    fn select_to_start(&mut self, _: &SelectToStart, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_to(0, cx);
+    }
+
+    fn select_to_end(&mut self, _: &SelectToEnd, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_to(self.content.len(), cx);
     }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
@@ -683,7 +778,9 @@ impl Element for TextElement {
             cx,
         );
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
-            if let Some(selection) = prepaint.selection.take() {
+            if focus.is_focused(window)
+                && let Some(selection) = prepaint.selection.take()
+            {
                 window.paint_quad(selection);
             }
             let origin = point(bounds.left() - scroll, bounds.top());
@@ -713,7 +810,19 @@ impl Element for TextElement {
 }
 
 impl Render for QueryField {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let focused = self.focus.is_focused(window);
+        if focused != self.was_focused {
+            self.was_focused = focused;
+            if !focused {
+                self.selecting = false;
+                if !self.selected.is_empty() {
+                    let at = self.clamp(self.cursor());
+                    self.selected = at..at;
+                    self.reversed = false;
+                }
+            }
+        }
         div()
             .key_context(CONTEXT)
             .track_focus(&self.focus)
@@ -722,8 +831,14 @@ impl Render for QueryField {
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::left))
             .on_action(cx.listener(Self::right))
+            .on_action(cx.listener(Self::word_left))
+            .on_action(cx.listener(Self::word_right))
             .on_action(cx.listener(Self::select_left))
             .on_action(cx.listener(Self::select_right))
+            .on_action(cx.listener(Self::select_word_left))
+            .on_action(cx.listener(Self::select_word_right))
+            .on_action(cx.listener(Self::select_to_start))
+            .on_action(cx.listener(Self::select_to_end))
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::home))
             .on_action(cx.listener(Self::end))
