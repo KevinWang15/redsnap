@@ -76,7 +76,8 @@ Rules:
 - **Enter** puts the entry on the clipboard and pastes it into the app that was in
   front before RedSnap opened (Ctrl+V / Cmd+V sent once that app has focus
   again).
-- **Cmd/Ctrl+C** copies it without pasting.
+- **Cmd/Ctrl+C** copies the selected text in the preview pane (staying open), or copies the whole selected entry without pasting when nothing is selected.
+- **Selecting text in the preview**: drag to select characters, double-click for a word, triple-click for a line, or press **Cmd/Ctrl+A** to select all preview text; copy with **Cmd/Ctrl+C** or right-click for the context menu (**Copy**, **Select All**, **Copy All**). **Escape** clears the selection first before dismissing the window.
 - **Ctrl+P** (Cmd+P) pins or unpins it: pinned entries stay at the top of the
   full list and retention never removes them.
 - **Ctrl+Delete** (Cmd+Backspace on macOS) deletes it; the selection moves to

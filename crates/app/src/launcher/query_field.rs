@@ -132,6 +132,49 @@ impl QueryField {
         cx.emit(QueryChanged);
     }
 
+    /// Collapses any active selection to the caret without changing the text.
+    pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        if !self.selected.is_empty() {
+            let at = self.clamp(self.cursor());
+            self.selected = at..at;
+            self.reversed = false;
+            cx.notify();
+        }
+    }
+
+    /// Inserts `text` at the current selection (used when typing while another
+    /// pane inside the launcher has focus).
+    pub fn insert_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        perf::input_started();
+        let range = self.clamp_range(&self.selected);
+        self.content.replace_range(range.clone(), text);
+        let end = range.start + text.len();
+        self.selected = end..end;
+        self.reversed = false;
+        self.marked = None;
+        cx.notify();
+        cx.emit(QueryChanged);
+    }
+
+    /// Deletes the selection or the character before the caret.
+    pub fn delete_backward(&mut self, cx: &mut Context<Self>) {
+        perf::input_started();
+        let mut range = self.clamp_range(&self.selected);
+        if range.is_empty() {
+            let prev = self.previous_boundary(range.start);
+            if prev == range.start {
+                return;
+            }
+            range = prev..range.start;
+        }
+        self.content.replace_range(range.clone(), "");
+        self.selected = range.start..range.start;
+        self.reversed = false;
+        self.marked = None;
+        cx.notify();
+        cx.emit(QueryChanged);
+    }
+
     // Offsets also arrive from the OS (IME queries) and from the last layout,
     // which can be a frame behind the content. Every one is clamped to the
     // content and to a character boundary before use.

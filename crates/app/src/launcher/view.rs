@@ -30,11 +30,7 @@ fn shortcut(n: usize) -> String {
 }
 
 impl Render for Launcher {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.in_clipboard() && self.preview_unmeasured() {
-            // Draw once more when the preview knows its size (for the scrollbar).
-            window.request_animation_frame();
-        }
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let has_query = !self.field.read(cx).is_empty();
         let rows = self.opts.rows;
         let count = self.hits.len();
@@ -206,9 +202,7 @@ impl Render for Launcher {
             // space would otherwise blur it (gpui's mouse down default), and
             // the launcher's keys go through the field.
             .on_any_mouse_down(|_, window, _| window.prevent_default())
-            .on_mouse_move(cx.listener(Self::clip_drag_move))
-            .on_mouse_up(gpui::MouseButton::Left, cx.listener(Self::clip_drag_end))
-            .on_mouse_up_out(gpui::MouseButton::Left, cx.listener(Self::clip_drag_end))
+            .on_key_down(cx.listener(Self::on_key_down))
             .on_action(cx.listener(Self::preview_down))
             .on_action(cx.listener(Self::preview_up))
             .on_action(cx.listener(Self::dismiss))

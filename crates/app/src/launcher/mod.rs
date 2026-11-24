@@ -8,9 +8,10 @@ mod view;
 use std::sync::Arc;
 use std::time::Instant;
 
+use gpui::components::SelectableTextEvent;
 use gpui::{
-    AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable, KeyBinding, Window,
-    WindowHandle, actions,
+    AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable, KeyBinding, KeyDownEvent,
+    Window, WindowHandle, actions,
 };
 use redsnap_core::files::{FileRequest, FileResults, Files};
 use redsnap_core::item::{Action, Item};
@@ -32,6 +33,7 @@ actions!(
         PageUp,
         PreviewDown,
         PreviewUp,
+        CopyEntry,
         TogglePin,
         DeleteEntry,
         Run,
@@ -70,6 +72,7 @@ pub fn bind_keys(cx: &mut gpui::App) {
         KeyBinding::new("pageup", PageUp, c),
         KeyBinding::new("shift-pagedown", PreviewDown, c),
         KeyBinding::new("shift-pageup", PreviewUp, c),
+        KeyBinding::new(secondary!("c"), CopyEntry, c),
         KeyBinding::new(secondary!("p"), TogglePin, c),
         // Cmd+Backspace in Finder; Ctrl+Delete elsewhere (Ctrl+Backspace means
         // "delete the previous word" in a text box).
@@ -164,9 +167,26 @@ impl Launcher {
         cx: &mut Context<Self>,
     ) -> Self {
         let field = cx.new(|cx| QueryField::new("Search apps and commands", cx));
+        let clip = clip::ClipView::new(cx);
+        let field_focus = field.focus_handle(cx);
         let subs = vec![
             cx.subscribe(&field, |this, _, _: &QueryChanged, cx| {
                 this.query_changed(cx)
+            }),
+            cx.subscribe(&clip.preview, |this, _, ev: &SelectableTextEvent, cx| {
+                match ev {
+                    SelectableTextEvent::Focus => {
+                        this.clip.panel = None;
+                        this.field.update(cx, |f, cx| f.clear_selection(cx));
+                        cx.notify();
+                    }
+                    SelectableTextEvent::SelectionChanged(_) => cx.notify(),
+                    SelectableTextEvent::Copy(_) => this.clip_flash_copied(cx),
+                    SelectableTextEvent::Blur => {}
+                }
+            }),
+            cx.on_focus(&field_focus, window, |this, _, cx| {
+                this.clip_clear_preview_focus_state(cx);
             }),
             // Hide when focus moves elsewhere, but only after the window has
             // had focus since it was shown: right after mapping, X11 (and a
@@ -198,7 +218,7 @@ impl Launcher {
             native: None,
             visible: false,
             clip_sticky: false,
-            clip: clip::ClipView::default(),
+            clip,
             paste_target: None,
             had_focus: false,
             opts,
@@ -282,7 +302,7 @@ impl Launcher {
         log::debug!("query {:?}", self.query);
         if self.in_clipboard() && !was_clipboard {
             // Entering the clipboard view: a fresh list and preview.
-            self.clip = clip::ClipView::default();
+            self.clip.reset(cx);
         }
         self.panel = None;
         self.confirming = None;
@@ -325,7 +345,7 @@ impl Launcher {
     /// Fresh state for a new show: empty query, the most used items.
     fn reset(&mut self, clipboard: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.clip_sticky = clipboard;
-        self.clip = clip::ClipView::default();
+        self.clip.reset(cx);
         if let Some(e) = execute::take_error() {
             self.notice = Some(e);
         }
@@ -354,6 +374,7 @@ impl Launcher {
         self.had_focus = false;
         self.panel = None;
         self.confirming = None;
+        self.clip_clear_preview_focus_state(cx);
         let native = self.native;
         cx.spawn(async move |_, cx| {
             if cfg!(target_os = "macos") {
@@ -365,11 +386,14 @@ impl Launcher {
         .detach();
     }
 
-    fn move_selection(&mut self, to: isize, cx: &mut Context<Self>) {
+    fn move_selection(&mut self, to: isize, window: &mut Window, cx: &mut Context<Self>) {
         if self.in_clipboard() && self.clip_panel_move(to, cx) {
             return;
         }
         if self.panel.is_none() && self.in_clipboard() {
+            if self.clip_preview_focused(window, cx) {
+                window.focus(&self.field.focus_handle(cx), cx);
+            }
             self.clip_move(to, cx);
             self.paint_soon(cx);
             return;
@@ -395,56 +419,92 @@ impl Launcher {
         self.panel.as_ref().map_or(self.selected, |p| p.selected) as isize
     }
 
-    fn select_next(&mut self, _: &SelectNext, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_selection(self.current() + 1, cx);
+    fn select_next(&mut self, _: &SelectNext, window: &mut Window, cx: &mut Context<Self>) {
+        if self.clip_context_menu_open(cx) {
+            cx.propagate();
+            return;
+        }
+        self.move_selection(self.current() + 1, window, cx);
     }
 
-    fn select_prev(&mut self, _: &SelectPrev, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_selection(self.current() - 1, cx);
+    fn select_prev(&mut self, _: &SelectPrev, window: &mut Window, cx: &mut Context<Self>) {
+        if self.clip_context_menu_open(cx) {
+            cx.propagate();
+            return;
+        }
+        self.move_selection(self.current() - 1, window, cx);
     }
 
-    fn page_down(&mut self, _: &PageDown, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_selection(self.current() + self.opts.rows as isize, cx);
+    fn page_down(&mut self, _: &PageDown, window: &mut Window, cx: &mut Context<Self>) {
+        if self.clip_context_menu_open(cx) {
+            return;
+        }
+        self.move_selection(self.current() + self.opts.rows as isize, window, cx);
     }
 
-    fn page_up(&mut self, _: &PageUp, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_selection(self.current() - self.opts.rows as isize, cx);
+    fn page_up(&mut self, _: &PageUp, window: &mut Window, cx: &mut Context<Self>) {
+        if self.clip_context_menu_open(cx) {
+            return;
+        }
+        self.move_selection(self.current() - self.opts.rows as isize, window, cx);
     }
 
-    /// Ctrl/Cmd+C with nothing selected in the field: copy the selected
-    /// clipboard entry (no paste).
-    fn copy_entry(&mut self, _: &query_field::Copy, _: &mut Window, cx: &mut Context<Self>) {
+    /// Ctrl/Cmd+C with nothing selected in the field or preview: copy the
+    /// selected clipboard entry (no paste).
+    fn copy_entry(&mut self, _: &CopyEntry, _: &mut Window, cx: &mut Context<Self>) {
+        if self.clip_context_menu_open(cx) {
+            return;
+        }
         if self.in_clipboard() {
             self.clip_use(false, cx);
         }
     }
 
     fn preview_down(&mut self, _: &PreviewDown, _: &mut Window, cx: &mut Context<Self>) {
+        if self.clip_context_menu_open(cx) {
+            return;
+        }
         if self.in_clipboard() {
             self.clip_page(true, cx);
         }
     }
 
     fn preview_up(&mut self, _: &PreviewUp, _: &mut Window, cx: &mut Context<Self>) {
+        if self.clip_context_menu_open(cx) {
+            return;
+        }
         if self.in_clipboard() {
             self.clip_page(false, cx);
         }
     }
 
     fn toggle_pin(&mut self, _: &TogglePin, _: &mut Window, cx: &mut Context<Self>) {
+        if self.clip_context_menu_open(cx) {
+            return;
+        }
         if self.in_clipboard() {
             self.clip_pin(cx);
         }
     }
 
     fn delete_entry(&mut self, _: &DeleteEntry, _: &mut Window, cx: &mut Context<Self>) {
+        if self.clip_context_menu_open(cx) {
+            return;
+        }
         if self.in_clipboard() {
             self.clip_delete(cx);
         }
     }
 
-    fn toggle_actions(&mut self, _: &ToggleActions, _: &mut Window, cx: &mut Context<Self>) {
+    fn toggle_actions(&mut self, _: &ToggleActions, window: &mut Window, cx: &mut Context<Self>) {
+        if self.clip_context_menu_open(cx) {
+            cx.propagate();
+            return;
+        }
         if self.in_clipboard() {
+            if self.clip_preview_focused(window, cx) {
+                window.focus(&self.field.focus_handle(cx), cx);
+            }
             self.clip_toggle_panel(cx);
             return;
         }
@@ -477,6 +537,10 @@ impl Launcher {
     }
 
     fn dismiss(&mut self, _: &Dismiss, _: &mut Window, cx: &mut Context<Self>) {
+        if self.clip_context_menu_open(cx) {
+            cx.propagate();
+            return;
+        }
         if self.panel.take().is_some()
             || self.confirming.take().is_some()
             || self.clip.panel.take().is_some()
@@ -488,6 +552,10 @@ impl Launcher {
     }
 
     fn run(&mut self, _: &Run, _: &mut Window, cx: &mut Context<Self>) {
+        if self.clip_context_menu_open(cx) {
+            cx.propagate();
+            return;
+        }
         if self.in_clipboard() {
             self.clip_enter(cx);
             return;
@@ -502,6 +570,9 @@ impl Launcher {
     }
 
     fn run_secondary(&mut self, _: &RunSecondary, _: &mut Window, cx: &mut Context<Self>) {
+        if self.clip_context_menu_open(cx) {
+            return;
+        }
         if let Some(hit) = self.hits.get(self.selected)
             && let Some(action) = hit.item.secondary.clone()
         {
@@ -511,9 +582,41 @@ impl Launcher {
     }
 
     pub(super) fn run_row(&mut self, slot: usize, cx: &mut Context<Self>) {
+        if self.clip_context_menu_open(cx) {
+            return;
+        }
         if let Some(hit) = self.hits.get(self.top + slot) {
             let item = hit.item.clone();
             self.execute(item.clone(), item.primary.clone(), cx);
+        }
+    }
+
+    /// Typing while the clipboard preview pane has focus routes back to the
+    /// search field so filtering stays instant without clicking the input.
+    pub(super) fn on_key_down(
+        &mut self,
+        ev: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.clip_preview_focused(window, cx) || self.clip_context_menu_open(cx) {
+            return;
+        }
+        let mods = ev.keystroke.modifiers;
+        if mods.control || mods.alt || mods.platform || mods.function {
+            return;
+        }
+        if ev.keystroke.key == "backspace" {
+            window.focus(&self.field.focus_handle(cx), cx);
+            self.field.update(cx, |f, cx| f.delete_backward(cx));
+            cx.stop_propagation();
+        } else if let Some(text) = ev.keystroke.key_char.as_deref()
+            && !text.is_empty()
+            && !text.chars().all(char::is_control)
+        {
+            window.focus(&self.field.focus_handle(cx), cx);
+            self.field.update(cx, |f, cx| f.insert_text(text, cx));
+            cx.stop_propagation();
         }
     }
 
