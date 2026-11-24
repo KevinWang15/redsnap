@@ -438,11 +438,16 @@ impl Launcher {
         cx.notify();
     }
 
-    /// Enter: the panel's action if it's open, otherwise paste.
+    /// Enter: the panel's action if it's open, otherwise paste (or copy only
+    /// when pasting isn't permitted on this OS, e.g. macOS without Accessibility).
     pub(super) fn clip_enter(&mut self, cx: &mut Context<Self>) {
         let action = match (self.clip.panel.take(), self.selected_entry()) {
             (Some(i), Some(e)) => actions_for(e).get(i).copied(),
-            _ => Some(ClipAction::Paste),
+            _ => Some(if redsnap_platform::clipboard::can_paste() {
+                ClipAction::Paste
+            } else {
+                ClipAction::Copy
+            }),
         };
         match action {
             Some(ClipAction::Paste) => self.clip_use(true, cx),
@@ -649,7 +654,7 @@ impl Launcher {
             })
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.clip.selected = this.clip.top + slot;
-                this.clip_use(true, cx);
+                this.clip_use(redsnap_platform::clipboard::can_paste(), cx);
             }))
             .child(
                 div()

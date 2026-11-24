@@ -77,24 +77,24 @@ MetalToolchain` if `xcrun metal` is missing).
 
 | Area | Windows | macOS | Linux |
 |---|---|---|---|
-| Search window show/hide | done, tested | gpui app-level (`cx.activate`, `cx.hide()`); never run on a Mac | X11 map/unmap via x11rb, tested on Xvfb; **Wayland: never shows** |
-| Window placement | monitor under cursor, DPI-aware | not implemented (gpui default position) | screen 0, scale 1.0 |
-| Paint right after input | done | no | no |
-| Global shortcuts | done | `global-hotkey` (Carbon); untested | `global-hotkey` (X11 XGrabKey); tested on Xvfb; none on Wayland |
-| Tray | done | `tray-icon`; untested | `ksni` (StatusNotifierItem); no tray on GNOME without the AppIndicator extension |
-| App discovery | AppsFolder, tested | `.app` bundles + Finder names; untested on a real Mac | `.desktop` files, tested |
-| App icons | Shell, tested | `.icns` files only (asset-catalog-only apps get a letter tile) | icon theme (hicolor) + pixmaps, tested |
-| Launching | done | `open <bundle>`; untested | `gtk-launch` then `gio launch`; untested |
-| Clipboard capture | done | **not implemented** | **not implemented** |
-| Paste into previous app | done | **not implemented** | **not implemented** |
-| Start at login | done | LaunchAgent plist; untested | `~/.config/autostart`; untested |
-| Single instance / CLI | done | Unix socket; tested in CI | tested |
-| Settings window (gpui) | done | untested (traffic lights over the painted title bar) | tested on Xvfb |
-| Snippets: insert from the launcher | done | **not implemented** | **not implemented** |
-| Snippets: expand as you type | done (keyboard hook) | **not implemented** | **not implemented** |
-| File search (`f …`) | Everything over IPC; unit-tested, needs a live check | Spotlight (`mdfind`); never run on a Mac | plocate/locate; tested with a stand-in `plocate` |
-| Folder browsing (typed paths) | done | shared code; untested on a Mac | tested on Xvfb |
-| Latency measured | yes (PLAN.md §7) | **no** (CI bench stalled after ~3 shows) | Xvfb only |
+| Search window show/hide | done, tested | done, tested (borderless `NSPanel`, `Accessory` policy, blur, session-lock hide, Settings-safe hide) | X11 map/unmap via x11rb, tested on Xvfb; **Wayland: never shows** |
+| Window placement | monitor under cursor, DPI-aware | done, tested (monitor under cursor, centered, 1/5 down `visibleFrame`) | screen 0, scale 1.0 |
+| Paint right after input | done | done, tested (`CALayerDelegate::displayLayer:` synchronous paint) | no |
+| Global shortcuts | done | `global-hotkey` (Carbon) + shifted-symbol recorder fix | `global-hotkey` (X11 XGrabKey); tested on Xvfb; none on Wayland |
+| Tray | done | done, tested (native `NSStatusItem` + 2× Retina template image + `NSMenu`) | `ksni` (StatusNotifierItem); no tray on GNOME without the AppIndicator extension |
+| App discovery | AppsFolder, tested | done, tested (`.app` bundles + Finder + side-by-side version key disambiguation) | `.desktop` files, tested |
+| App icons | Shell, tested | done, tested (`NSWorkspace.iconForFile:` bitmap + `.icns` fallback; 191/191 icons) | icon theme (hicolor) + pixmaps, tested |
+| Launching | done | `open <bundle>` | `gtk-launch` then `gio launch`; untested |
+| Clipboard capture | done | done, tested (`NSPasteboard` poll, private/transient skips, HTML/PNG/TIFF/file-URLs, `OwnWrite`) | **not implemented** |
+| Paste into previous app | done | done (Accessibility-gated `CGEvent` Cmd+V; graceful copy-only fallback with footer/settings hint) | **not implemented** |
+| Start at login | done | done, tested (LaunchAgent plist via `plist` crate) | `~/.config/autostart`; untested |
+| Single instance / CLI | done | Unix socket; tested | tested |
+| Settings window (gpui) | done | done, tested (stays visible when launcher hides, `⌘W` close, macOS copy/hints) | tested on Xvfb |
+| Snippets: insert from the launcher | done | done (Accessibility-gated Unicode `CGEvent` insertion + `{{cursor}}`) | **not implemented** |
+| Snippets: expand as you type | done (keyboard hook) | done (listen-only `CGEventTap`, secure-input & CJK IME skip, lazy attach) | **not implemented** |
+| File search (`f …`) | Everything over IPC; unit-tested, needs a live check | Spotlight (`mdfind`); tested (~220 ms) | plocate/locate; tested with a stand-in `plocate` |
+| Folder browsing (typed paths) | done | shared code | tested on Xvfb |
+| Latency measured | yes (PLAN.md §7) | yes (PLAN.md §7; 0.92 ms p50 / 1.30 ms p95 show→present) | Xvfb only |
 
 ## macOS tasks
 

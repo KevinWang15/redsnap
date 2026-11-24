@@ -1,7 +1,7 @@
 //! Snippet expansion: watching what's typed in any app and replacing a
 //! trigger with its snippet, and typing a snippet into the app that was in
 //! front (from the launcher). Matching and templates are in
-//! `redsnap_core::snippets`; this is the OS side. Windows only for now.
+//! `redsnap_core::snippets`; this is the OS side.
 
 use std::collections::HashMap;
 
@@ -10,8 +10,27 @@ use redsnap_core::snippets::Triggers;
 
 use crate::clipboard::Target;
 
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(windows)]
 mod windows;
+
+/// Whether snippet expansion as you type is available right now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Availability {
+    Ready,
+    NeedsPermission,
+    Unavailable,
+}
+
+pub fn availability() -> Availability {
+    #[cfg(windows)]
+    return Availability::Ready;
+    #[cfg(target_os = "macos")]
+    return macos::availability();
+    #[cfg(not(any(windows, target_os = "macos")))]
+    Availability::Unavailable
+}
 
 /// What the expander needs; replaced whole when settings change.
 #[derive(Clone, Default)]
@@ -43,16 +62,22 @@ impl ExpanderConfig {
 pub struct Expander {
     #[cfg(windows)]
     inner: windows::Expander,
+    #[cfg(target_os = "macos")]
+    inner: macos::Expander,
 }
 
 impl Expander {
-    /// `None` where expansion as you type isn't available yet (macOS, Linux).
+    /// `None` where expansion as you type isn't available yet (Linux).
     pub fn start(config: ExpanderConfig) -> anyhow::Result<Option<Expander>> {
         #[cfg(windows)]
         return Ok(Some(Expander {
             inner: windows::Expander::start(config)?,
         }));
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
+        return Ok(Some(Expander {
+            inner: macos::Expander::start(config)?,
+        }));
+        #[cfg(not(any(windows, target_os = "macos")))]
         {
             let _ = config;
             Ok(None)
@@ -60,9 +85,9 @@ impl Expander {
     }
 
     pub fn update(&self, config: ExpanderConfig) {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         self.inner.update(config);
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "macos")))]
         let _ = config;
     }
 }
@@ -72,7 +97,9 @@ impl Expander {
 pub fn insert(target: Target, text: &str, cursor_back: usize) -> anyhow::Result<()> {
     #[cfg(windows)]
     return windows::insert(target, text, cursor_back);
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    return macos::insert(target, text, cursor_back);
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = (target, text, cursor_back);
         anyhow::bail!("inserting snippets isn't implemented on this OS yet")

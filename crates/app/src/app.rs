@@ -59,6 +59,8 @@ pub enum Event {
     InsertSnippet(String, Option<redsnap_platform::clipboard::Target>),
     /// The file index or a folder listing answered.
     Files(redsnap_core::files::FileResults),
+    /// The session locked or the machine is going to sleep: hide and clear.
+    Hide,
 }
 
 /// A rescan is due on show when the catalog is older than this.
@@ -168,7 +170,7 @@ struct State {
     scan_ms: i64,
     scanning: bool,
     tray: Option<Tray>,
-    /// Expands snippet triggers as they're typed (Windows).
+    /// Expands snippet triggers as they're typed (Windows, macOS).
     expander: Option<Expander>,
     settings: SettingsHost,
     events: UnboundedSender<Event>,
@@ -190,163 +192,170 @@ pub fn run(
     let usage = UsageStore::open(&paths.data.join("usage.db"))?;
     autostart::refresh();
 
-    gpui_platform::application()
-        .with_assets(crate::assets::Assets)
-        .run(move |cx| {
-            cx.set_global(Shell {
-                paths: paths.clone(),
-            });
-            cx.set_global(Events(events.clone()));
-            let catalog = Arc::new(ArcSwap::from_pointee(AppCatalog::empty()));
-            let icon_events = events.clone();
-            cx.set_global(crate::icons::Icons::start(
-                paths.cache.join("icons"),
-                move |id, icon| {
-                    let _ = icon_events.unbounded_send(Event::Icon(id, icon));
-                },
-            ));
-            let _ = events.unbounded_send(Event::Rescan);
-            // The settings window's components and theme.
-            gpui::components::Theme::set_global(crate::settings::theme(), cx);
-            gpui::components::init_components(cx);
-            crate::launcher::query_field::bind_keys(cx);
-            launcher::bind_keys(cx);
-
-            let rows = config.rows as usize;
-            let look = os::LOOK;
-            let lopts = launcher::Options {
-                rows,
-                radius: look.radius,
-                fill: look.fill,
-            };
-            let bounds = Bounds {
-                origin: point(px(0.), px(0.)),
-                size: size(px(launcher::WIDTH), px(launcher::height(rows))),
-            };
-            let window_engine = engine(&config, catalog.clone());
-            let file_events = events.clone();
-            let file_search = files::FileSearch::start(Box::new(move |r| {
-                let _ = file_events.unbounded_send(Event::Files(r));
-            }))
-            .map_err(|e| log::warn!("file search: {e:#}"))
-            .ok();
-            let window_usage = usage.clone();
-            let handle: WindowHandle<Launcher> = match cx.open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    titlebar: None,
-                    focus: false,
-                    show: false,
-                    kind: WindowKind::PopUp,
-                    is_movable: false,
-                    is_resizable: false,
-                    is_minimizable: false,
-                    window_background: if look.blur {
-                        WindowBackgroundAppearance::Blurred
-                    } else {
-                        WindowBackgroundAppearance::Transparent
-                    },
-                    app_id: Some("redsnap".into()),
-                    ..Default::default()
-                },
-                |window, cx| {
-                    cx.new(|cx| {
-                        Launcher::new(window_engine, file_search, window_usage, lopts, window, cx)
-                    })
-                },
-            ) {
-                Ok(h) => h,
-                Err(e) => {
-                    log::error!("can't create the search window: {e:#}");
-                    cx.quit();
-                    return;
-                }
-            };
-            let native = handle
-                .update(cx, |launcher, window, _| {
-                    launcher.native = os::native(window);
-                    launcher.native
-                })
-                .ok()
-                .flatten();
-
-            // The global shortcuts. If one is taken, RedSnap still runs (tray,
-            // `redsnap toggle`) and says so when the window opens.
-            let mut hotkeys = Hotkeys::new(events.clone());
-            let clip_hotkey = config
-                .clipboard
-                .enabled
-                .then_some(config.clipboard.hotkey.as_str());
-            for problem in hotkeys.start(&config.hotkey, clip_hotkey) {
-                log::warn!("{problem}");
-                notice.get_or_insert(format!("{problem} Change it in Settings."));
-            }
-
-            // Clipboard history: the store, and the watcher that feeds it.
-            if config.clipboard.enabled
-                && let Err(e) = start_clipboard(&config, &paths, &events, cx)
-            {
-                notice.get_or_insert(format!(
-                    "Clipboard history couldn't open its database: {e:#}"
-                ));
-            }
-
-            let expander = Expander::start(ExpanderConfig::from_config(&config.snippets))
-                .map_err(|e| log::warn!("snippet expansion: {e:#}"))
-                .ok()
-                .flatten();
-
-            let tray_events = events.clone();
-            let tray = Tray::new(
-                autostart::is_enabled(),
-                Box::new(move |c| {
-                    let _ = tray_events.unbounded_send(Event::Tray(c));
-                }),
-            )
-            .map_err(|e| log::warn!("tray: {e:#}"))
-            .ok();
-
-            if notice.is_some() {
-                handle
-                    .update(cx, |l, _, cx| l.set_notice(notice.clone(), cx))
-                    .ok();
-            }
-            // First start (or a problem to report) shows the window; start at
-            // login stays in the background.
-            if !opts.background || notice.is_some() {
-                let _ = events.unbounded_send(Event::Cli(CliCommand::Show));
-            }
-
-            let mut state = State {
-                paths: paths.clone(),
-                config,
-                revision: 1,
-                hotkeys,
-                catalog,
-                usage,
-                apps: Vec::new(),
-                last_scan: None,
-                scan_ms: 0,
-                scanning: false,
-                tray,
-                expander,
-                settings: SettingsHost::default(),
-                events: events.clone(),
-                handle,
-            };
-            cx.spawn(async move |cx| {
-                // First, outside any update: style the window and make sure it's
-                // hidden. Events (the first show included) are handled after.
-                if let Some(n) = native {
-                    os::setup(n);
-                    os::hide(n);
-                }
-                while let Some(event) = rx.next().await {
-                    state.handle(event, cx).await;
-                }
-            })
-            .detach();
+    let app = gpui_platform::application().with_assets(crate::assets::Assets);
+    #[cfg(target_os = "macos")]
+    let app = app.with_windowing(gpui::WindowingRequest::Headless);
+    app.run(move |cx| {
+        cx.set_global(Shell {
+            paths: paths.clone(),
         });
+        cx.set_global(Events(events.clone()));
+        let catalog = Arc::new(ArcSwap::from_pointee(AppCatalog::empty()));
+        let icon_events = events.clone();
+        cx.set_global(crate::icons::Icons::start(
+            paths.cache.join("icons"),
+            move |id, icon| {
+                let _ = icon_events.unbounded_send(Event::Icon(id, icon));
+            },
+        ));
+        let _ = events.unbounded_send(Event::Rescan);
+        // The settings window's components and theme.
+        gpui::components::Theme::set_global(crate::settings::theme(), cx);
+        gpui::components::init_components(cx);
+        crate::launcher::query_field::bind_keys(cx);
+        launcher::bind_keys(cx);
+
+        let rows = config.rows as usize;
+        let look = os::LOOK;
+        let lopts = launcher::Options {
+            rows,
+            radius: look.radius,
+            fill: look.fill,
+        };
+        let bounds = Bounds {
+            origin: point(px(0.), px(0.)),
+            size: size(px(launcher::WIDTH), px(launcher::height(rows))),
+        };
+        let window_engine = engine(&config, catalog.clone());
+        let file_events = events.clone();
+        let file_search = files::FileSearch::start(Box::new(move |r| {
+            let _ = file_events.unbounded_send(Event::Files(r));
+        }))
+        .map_err(|e| log::warn!("file search: {e:#}"))
+        .ok();
+        let window_usage = usage.clone();
+        let handle: WindowHandle<Launcher> = match cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                titlebar: None,
+                focus: false,
+                show: false,
+                kind: WindowKind::PopUp,
+                is_movable: false,
+                is_resizable: false,
+                is_minimizable: false,
+                window_background: if look.blur {
+                    WindowBackgroundAppearance::Blurred
+                } else {
+                    WindowBackgroundAppearance::Transparent
+                },
+                app_id: Some("redsnap".into()),
+                ..Default::default()
+            },
+            |window, cx| {
+                cx.new(|cx| {
+                    Launcher::new(window_engine, file_search, window_usage, lopts, window, cx)
+                })
+            },
+        ) {
+            Ok(h) => h,
+            Err(e) => {
+                log::error!("can't create the search window: {e:#}");
+                cx.quit();
+                return;
+            }
+        };
+        let native = handle
+            .update(cx, |launcher, window, _| {
+                launcher.native = os::native(window);
+                launcher.native
+            })
+            .ok()
+            .flatten();
+
+        // The global shortcuts. If one is taken, RedSnap still runs (tray,
+        // `redsnap toggle`) and says so when the window opens.
+        let mut hotkeys = Hotkeys::new(events.clone());
+        let clip_hotkey = config
+            .clipboard
+            .enabled
+            .then_some(config.clipboard.hotkey.as_str());
+        for problem in hotkeys.start(&config.hotkey, clip_hotkey) {
+            log::warn!("{problem}");
+            notice.get_or_insert(format!("{problem} Change it in Settings."));
+        }
+
+        // Clipboard history: the store, and the watcher that feeds it.
+        if config.clipboard.enabled
+            && let Err(e) = start_clipboard(&config, &paths, &events, cx)
+        {
+            notice.get_or_insert(format!(
+                "Clipboard history couldn't open its database: {e:#}"
+            ));
+        }
+
+        let expander = Expander::start(ExpanderConfig::from_config(&config.snippets))
+            .map_err(|e| log::warn!("snippet expansion: {e:#}"))
+            .ok()
+            .flatten();
+
+        let tray_events = events.clone();
+        let tray = Tray::new(
+            autostart::is_enabled(),
+            Box::new(move |c| {
+                let _ = tray_events.unbounded_send(Event::Tray(c));
+            }),
+        )
+        .map_err(|e| log::warn!("tray: {e:#}"))
+        .ok();
+
+        if notice.is_some() {
+            handle
+                .update(cx, |l, _, cx| l.set_notice(notice.clone(), cx))
+                .ok();
+        }
+        // First start (or a problem to report) shows the window; start at
+        // login stays in the background.
+        if !opts.background || notice.is_some() {
+            let _ = events.unbounded_send(Event::Cli(CliCommand::Show));
+        }
+
+        let lock_events = events.clone();
+        os::init_app();
+        os::watch_session_lock(move || {
+            let _ = lock_events.unbounded_send(Event::Hide);
+        });
+
+        let mut state = State {
+            paths: paths.clone(),
+            config,
+            revision: 1,
+            hotkeys,
+            catalog,
+            usage,
+            apps: Vec::new(),
+            last_scan: None,
+            scan_ms: 0,
+            scanning: false,
+            tray,
+            expander,
+            settings: SettingsHost::default(),
+            events: events.clone(),
+            handle,
+        };
+        cx.spawn(async move |cx| {
+            // First, outside any update: style the window and make sure it's
+            // hidden. Events (the first show included) are handled after.
+            if let Some(n) = native {
+                os::setup(n);
+                os::hide(n);
+            }
+            while let Some(event) = rx.next().await {
+                state.handle(event, cx).await;
+            }
+        })
+        .detach();
+    });
     Ok(())
 }
 
@@ -496,6 +505,9 @@ impl State {
             }
             Event::Files(r) => {
                 handle.update(cx, |l, _, cx| l.files_arrived(r, cx)).ok();
+            }
+            Event::Hide => {
+                handle.update(cx, |l, _, cx| l.hide_and_clear(cx)).ok();
             }
             Event::Tray(TrayCommand::ToggleStartAtLogin) => {
                 if let Err(e) = autostart::set(!autostart::is_enabled()) {

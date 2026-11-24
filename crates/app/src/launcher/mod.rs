@@ -173,8 +173,9 @@ impl Launcher {
             cx.subscribe(&field, |this, _, _: &QueryChanged, cx| {
                 this.query_changed(cx)
             }),
-            cx.subscribe(&clip.preview, |this, _, ev: &SelectableTextEvent, cx| {
-                match ev {
+            cx.subscribe(
+                &clip.preview,
+                |this, _, ev: &SelectableTextEvent, cx| match ev {
                     SelectableTextEvent::Focus => {
                         this.clip.panel = None;
                         this.field.update(cx, |f, cx| f.clear_selection(cx));
@@ -183,8 +184,8 @@ impl Launcher {
                     SelectableTextEvent::SelectionChanged(_) => cx.notify(),
                     SelectableTextEvent::Copy(_) => this.clip_flash_copied(cx),
                     SelectableTextEvent::Blur => {}
-                }
-            }),
+                },
+            ),
             cx.on_focus(&field_focus, window, |this, _, cx| {
                 this.clip_clear_preview_focus_state(cx);
             }),
@@ -376,14 +377,19 @@ impl Launcher {
         self.confirming = None;
         self.clip_clear_preview_focus_state(cx);
         let native = self.native;
-        cx.spawn(async move |_, cx| {
-            if cfg!(target_os = "macos") {
-                cx.update(|cx| cx.hide());
-            } else if let Some(n) = native {
+        cx.spawn(async move |_, _| {
+            if let Some(n) = native {
                 os::hide(n);
             }
         })
         .detach();
+    }
+
+    /// Hides the window and clears the query (session lock / sleep).
+    pub fn hide_and_clear(&mut self, cx: &mut Context<Self>) {
+        self.field.update(cx, |f, cx| f.clear(cx));
+        self.query.clear();
+        self.hide(cx);
     }
 
     fn move_selection(&mut self, to: isize, window: &mut Window, cx: &mut Context<Self>) {
@@ -685,13 +691,6 @@ pub async fn show(
         (launcher.native, launcher.opts)
     });
     let Ok((native, opts)) = prepared else { return };
-    if cfg!(target_os = "macos") {
-        cx.update(|cx| cx.activate(true));
-        handle
-            .update(cx, |_, window, _| window.activate_window())
-            .ok();
-        return;
-    }
     let Some(n) = native else { return };
     log::debug!("show");
     os::set_cloaked(n, true);
@@ -700,9 +699,10 @@ pub async fn show(
     os::paint_now(n);
     os::set_cloaked(n, false);
     // The process that got the hotkey may take the foreground directly; gpui's
-    // own activate replays creation bounds and injects a fake Alt keypress.
+    // own activate replays creation bounds and injects a fake Alt keypress on
+    // Windows, and spawns a second deferred makeKeyAndOrderFront on macOS.
     os::take_focus(n);
-    if !cfg!(windows) {
+    if cfg!(target_os = "linux") {
         handle
             .update(cx, |_, window, _| window.activate_window())
             .ok();

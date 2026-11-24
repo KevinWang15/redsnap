@@ -116,16 +116,23 @@ impl Render for Launcher {
                 .into_any_element()
         };
 
+        let can_paste = in_clip && redsnap_platform::clipboard::can_paste();
         let footer_status: SharedString = match &self.confirming {
             Some(item) => format!("Press Enter again to {}", item.title.to_lowercase()).into(),
             None if in_clip => {
                 let n = self.clip.found.len();
-                format!("Clipboard · {n} entr{}", if n == 1 { "y" } else { "ies" }).into()
+                let count_text =
+                    format!("Clipboard · {n} entr{}", if n == 1 { "y" } else { "ies" });
+                if !can_paste && cfg!(target_os = "macos") {
+                    format!("{count_text} · Grant Accessibility to paste").into()
+                } else {
+                    count_text.into()
+                }
             }
             None => format!("{count} result{}", if count == 1 { "" } else { "s" }).into(),
         };
         let enter_label: &'static str = if in_clip {
-            "Paste"
+            if can_paste { "Paste" } else { "Copy" }
         } else {
             self.hits
                 .get(self.selected)

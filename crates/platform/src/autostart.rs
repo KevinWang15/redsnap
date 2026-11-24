@@ -115,50 +115,90 @@ mod imp {
         )
     }
 
+    pub(super) fn read_from(path: &Path) -> Option<PathBuf> {
+        let value = plist::Value::from_file(path).ok()?;
+        let args = value.as_dictionary()?.get("ProgramArguments")?.as_array()?;
+        let exe = args.first()?.as_string()?;
+        if exe.is_empty() {
+            return None;
+        }
+        Some(PathBuf::from(exe))
+    }
+
+    pub(super) fn write_to(path: &Path, exe: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut dict = plist::Dictionary::new();
+        dict.insert("Label".into(), plist::Value::String(LABEL.into()));
+        dict.insert(
+            "ProgramArguments".into(),
+            plist::Value::Array(vec![
+                plist::Value::String(exe.to_string_lossy().into_owned()),
+                plist::Value::String("--background".into()),
+            ]),
+        );
+        dict.insert("RunAtLoad".into(), plist::Value::Boolean(true));
+        plist::Value::Dictionary(dict)
+            .to_file_xml(path)
+            .with_context(|| format!("writing LaunchAgent {}", path.display()))?;
+        Ok(())
+    }
+
+    pub(super) fn remove_at(path: &Path) -> Result<()> {
+        match std::fs::remove_file(path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+            _ => Ok(()),
+        }
+    }
+
     pub fn read() -> Option<PathBuf> {
-        let text = std::fs::read_to_string(plist()?).ok()?;
-        let start = text.find("<string>/")? + "<string>".len();
-        let end = start + text[start..].find("</string>")?;
-        Some(PathBuf::from(&text[start..end]))
+        read_from(&plist()?)
     }
 
     pub fn write(exe: &Path) -> Result<()> {
         let path = plist().context("no home directory")?;
-        std::fs::create_dir_all(path.parent().unwrap())?;
-        let exe = exe
-            .display()
-            .to_string()
-            .replace('&', "&amp;")
-            .replace('<', "&lt;");
-        std::fs::write(
-            &path,
-            format!(
-                r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>{LABEL}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>{exe}</string>
-        <string>--background</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-</dict>
-</plist>
-"#
-            ),
-        )?;
-        Ok(())
+        write_to(&path, exe)
     }
 
     pub fn remove() -> Result<()> {
-        match plist().map(std::fs::remove_file) {
-            Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
-            _ => Ok(()),
+        match plist() {
+            Some(p) => remove_at(&p),
+            None => Ok(()),
         }
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::imp;
+    use std::path::PathBuf;
+
+    #[test]
+    fn launch_agent_plist_round_trips_special_chars() {
+        let dir = tempfile::tempdir().unwrap();
+        let plist_path = dir.path().join("com.kevinwang15.redsnap.plist");
+        let exe = PathBuf::from("/Applications/Red & Snap <Test>/Contents/MacOS/redsnap");
+
+        assert_eq!(imp::read_from(&plist_path), None);
+        imp::write_to(&plist_path, &exe).unwrap();
+        assert_eq!(imp::read_from(&plist_path), Some(exe));
+
+        // Verify ProgramArguments includes --background and RunAtLoad is true.
+        let value = plist::Value::from_file(&plist_path).unwrap();
+        let dict = value.as_dictionary().unwrap();
+        assert_eq!(
+            dict.get("RunAtLoad").and_then(|v| v.as_boolean()),
+            Some(true)
+        );
+        let args = dict.get("ProgramArguments").unwrap().as_array().unwrap();
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[1].as_string(), Some("--background"));
+
+        imp::remove_at(&plist_path).unwrap();
+        assert_eq!(imp::read_from(&plist_path), None);
+        // Removing an already-absent file succeeds.
+        imp::remove_at(&plist_path).unwrap();
     }
 }
 

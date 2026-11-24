@@ -48,6 +48,7 @@ const SIZE: (f32, f32) = (980., 700.);
 impl SettingsHost {
     /// Opens the settings window, or brings it forward if it's open.
     pub fn open(&mut self, cx: &mut AsyncApp) -> Result<()> {
+        redsnap_platform::window::activate_app();
         if let Some(w) = self.window
             && w.update(cx, |_, window, _| window.activate_window())
                 .is_ok()
@@ -89,6 +90,7 @@ impl SettingsHost {
                 |window, cx| cx.new(|cx| SettingsView::new(window, cx)),
             )
         })?;
+        redsnap_platform::window::activate_app();
         self.window = Some(handle);
         Ok(())
     }

@@ -208,6 +208,15 @@ mod windows {
         unsafe { SetForegroundWindow(hwnd(n)) };
     }
 
+    /// Process-level setup (App Nap / app icon on macOS; no-op here).
+    pub fn init_app() {}
+
+    /// Brings the application to the front (needed for Accessory apps on macOS).
+    pub fn activate_app() {}
+
+    /// Calls `on_lock` when the screen locks or the machine sleeps.
+    pub fn watch_session_lock(_on_lock: impl Fn() + Send + Sync + 'static) {}
+
     pub const CAN_PAINT_NOW: bool = true;
 }
 
@@ -286,6 +295,10 @@ mod linux {
         }
     }
 
+    pub fn init_app() {}
+    pub fn activate_app() {}
+    pub fn watch_session_lock(_on_lock: impl Fn() + Send + Sync + 'static) {}
+
     pub const CAN_PAINT_NOW: bool = false;
 }
 
@@ -294,38 +307,350 @@ pub use macos::*;
 
 #[cfg(target_os = "macos")]
 mod macos {
-    //! macOS goes through gpui's app-level calls (see launcher.rs); these are
-    //! no-ops so the shared code compiles.
+    //! AppKit operations on the pre-created launcher panel: borderless look
+    //! with rounded live blur, placement on the screen under the pointer,
+    //! alpha-cloaked synchronous first paint, focus, and hiding only the
+    //! launcher without hiding the settings window.
+
+    use std::sync::Arc;
+
+    use block2::RcBlock;
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyObject, Bool};
+    use objc2::{AnyThread, MainThreadMarker, msg_send};
+    use objc2_app_kit::{
+        NSApplication, NSBezierPath, NSColor, NSEvent, NSImage, NSImageResizingMode, NSScreen,
+        NSView, NSVisualEffectView, NSWindow, NSWindowAnimationBehavior,
+        NSWindowCollectionBehavior, NSWindowStyleMask, NSWorkspace,
+        NSWorkspaceWillSleepNotification,
+    };
+    use objc2_foundation::{
+        NSActivityOptions, NSData, NSDistributedNotificationCenter, NSEdgeInsets, NSNotification,
+        NSPoint, NSProcessInfo, NSRect, NSSize, NSString,
+    };
+
     use super::{Look, Native};
 
-    /// Opts out of App Nap, which throttles a hidden app's timers (the bench
-    /// waits between steps would stretch from milliseconds to seconds). The
-    /// real app needs a decision here too: a hidden launcher is exactly what
-    /// App Nap targets.
+    /// Native behind-window blur (`NSVisualEffectView` under `GPUIView`) with
+    /// 20 px rounded corners masked cleanly on both the backdrop and shadow.
+    pub const LOOK: Look = Look {
+        blur: true,
+        radius: 20.0,
+        fill: 0.58,
+    };
+
+    const POPUP_WINDOW_LEVEL: isize = 101;
+
+    fn view(n: Native) -> Option<&'static NSView> {
+        let ptr = n.0 as *const NSView;
+        unsafe { ptr.as_ref() }
+    }
+
+    fn window_of(n: Native) -> Option<Retained<NSWindow>> {
+        view(n)?.window()
+    }
+
+    /// Opts out of App Nap while allowing idle system sleep, so global
+    /// hotkeys and clipboard polling stay responsive when RedSnap is hidden.
     pub fn keep_awake() {
-        use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
-        let reason = NSString::from_str("RedSnap latency bench");
+        let reason = NSString::from_str("RedSnap global shortcut and clipboard watcher");
         let token = NSProcessInfo::processInfo().beginActivityWithOptions_reason(
-            NSActivityOptions::UserInitiated | NSActivityOptions::LatencyCritical,
+            NSActivityOptions::UserInitiatedAllowingIdleSystemSleep,
             &reason,
         );
         std::mem::forget(token);
     }
 
-    /// No blur yet: a nearly opaque panel with its own 20 px corners on a
-    /// transparent window.
-    pub const LOOK: Look = Look {
-        blur: false,
-        radius: 20.0,
-        fill: 0.97,
-    };
+    /// App-level macOS initialization: disable App Nap and give the process
+    /// RedSnap's own icon (used by dialogs, Activity Monitor, and Settings).
+    pub fn init_app() {
+        keep_awake();
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        if let Some(img) = app_icon_nsimage(256) {
+            let app = NSApplication::sharedApplication(mtm);
+            unsafe { app.setApplicationIconImage(Some(&img)) };
+        }
+    }
 
-    pub fn setup(_: Native) {}
-    pub fn place_at_cursor(_: Native, _: (f32, f32)) {}
-    pub fn set_cloaked(_: Native, _: bool) {}
-    pub fn show(_: Native) {}
-    pub fn hide(_: Native) {}
-    pub fn paint_now(_: Native) {}
-    pub fn take_focus(_: Native) {}
-    pub const CAN_PAINT_NOW: bool = false;
+    /// Unhides (if hidden) and brings RedSnap to the front; needed for an
+    /// `Accessory` app when opening or focusing the Settings window.
+    pub fn activate_app() {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let app = NSApplication::sharedApplication(mtm);
+        if app.isHidden() {
+            app.unhideWithoutActivation();
+        }
+        #[allow(deprecated)]
+        app.activateIgnoringOtherApps(true);
+    }
+
+    /// Calls `on_lock` when the macOS screen locks or the system sleeps.
+    pub fn watch_session_lock(on_lock: impl Fn() + Send + Sync + 'static) {
+        let cb = Arc::new(on_lock);
+        unsafe {
+            let dist = NSDistributedNotificationCenter::defaultCenter();
+            let name = NSString::from_str("com.apple.screenIsLocked");
+            let cb1 = cb.clone();
+            let block1 = RcBlock::new(move |_notif: std::ptr::NonNull<NSNotification>| {
+                cb1();
+            });
+            let token1 =
+                dist.addObserverForName_object_queue_usingBlock(Some(&name), None, None, &block1);
+            std::mem::forget(token1);
+
+            let ws = NSWorkspace::sharedWorkspace().notificationCenter();
+            let block2 = RcBlock::new(move |_notif: std::ptr::NonNull<NSNotification>| {
+                cb();
+            });
+            let token2 = ws.addObserverForName_object_queue_usingBlock(
+                Some(NSWorkspaceWillSleepNotification),
+                None,
+                None,
+                &block2,
+            );
+            std::mem::forget(token2);
+        }
+    }
+
+    fn app_icon_nsimage(size: u32) -> Option<Retained<NSImage>> {
+        let rgba = crate::icon::app_icon_rgba(size);
+        let img = image::RgbaImage::from_raw(size, size, rgba)?;
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .ok()?;
+        let data = NSData::from_vec(png);
+        NSImage::initWithData(NSImage::alloc(), &data)
+    }
+
+    /// Stretchable rounded-rectangle mask image so `NSVisualEffectView` clips
+    /// its compositor backdrop blur and window shadow to `radius`.
+    fn rounded_mask_image(radius: f64) -> Retained<NSImage> {
+        let edge = (radius * 2.0 + 1.0).ceil();
+        let size = NSSize::new(edge, edge);
+        let handler = RcBlock::new(move |rect: NSRect| -> Bool {
+            let path =
+                NSBezierPath::bezierPathWithRoundedRect_xRadius_yRadius(rect, radius, radius);
+            NSColor::blackColor().setFill();
+            path.fill();
+            Bool::YES
+        });
+        let img = NSImage::imageWithSize_flipped_drawingHandler(size, false, &handler);
+        img.setCapInsets(NSEdgeInsets {
+            top: radius,
+            left: radius,
+            bottom: radius,
+            right: radius,
+        });
+        img.setResizingMode(NSImageResizingMode::Stretch);
+        img
+    }
+
+    /// Configures the launcher panel: borderless, no show/hide animation,
+    /// floats above other windows across all Spaces and over fullscreen apps,
+    /// with rounded corners on its content view and blur view.
+    pub fn setup(n: Native) {
+        let Some(ns_view) = view(n) else { return };
+        let Some(window) = ns_view.window() else {
+            return;
+        };
+        window.setStyleMask(NSWindowStyleMask::Borderless);
+        window.setLevel(POPUP_WINDOW_LEVEL);
+        window.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::FullScreenAuxiliary
+                | NSWindowCollectionBehavior::IgnoresCycle,
+        );
+        window.setAnimationBehavior(NSWindowAnimationBehavior::None);
+        window.setHidesOnDeactivate(false);
+        window.setMovable(false);
+        window.setHasShadow(true);
+        window.setOpaque(false);
+        window.setBackgroundColor(Some(&NSColor::clearColor()));
+
+        let radius = LOOK.radius as f64;
+        if let Some(content) = window.contentView() {
+            content.setWantsLayer(true);
+            if let Some(layer) = content.layer() {
+                layer.setCornerRadius(radius);
+                layer.setMasksToBounds(true);
+            }
+            let mask = LOOK.blur.then(|| rounded_mask_image(radius));
+            let mut masked = 0usize;
+            for sub in content.subviews() {
+                if let Ok(vev) = sub.downcast::<NSVisualEffectView>() {
+                    if let Some(mask) = &mask {
+                        vev.setMaskImage(Some(mask));
+                    }
+                    vev.setWantsLayer(true);
+                    if let Some(layer) = vev.layer() {
+                        layer.setCornerRadius(radius);
+                        layer.setMasksToBounds(true);
+                    }
+                    masked += 1;
+                }
+            }
+            log::debug!("macOS launcher setup: masked {masked} NSVisualEffectView(s)");
+        }
+        // Changing styleMask can clear firstResponder; restore it so typing
+        // never triggers the system beep.
+        window.makeFirstResponder(Some(ns_view));
+    }
+
+    /// Computes the launcher window's AppKit frame (bottom-left origin):
+    /// horizontally centered in `visible`, and one fifth of the spare vertical
+    /// space down from the top of `visible` (below the menu bar).
+    pub(crate) fn launcher_rect(visible: NSRect, size: (f32, f32)) -> NSRect {
+        let w = size.0 as f64;
+        let h = size.1 as f64;
+        let spare_x = (visible.size.width - w).max(0.0);
+        let spare_y = (visible.size.height - h).max(0.0);
+        let x = (visible.origin.x + spare_x / 2.0).round();
+        let top_margin = spare_y / 5.0;
+        let y = (visible.origin.y + visible.size.height - top_margin - h)
+            .max(visible.origin.y)
+            .round();
+        NSRect::new(NSPoint::new(x, y), NSSize::new(w, h))
+    }
+
+    fn point_in_rect(p: NSPoint, r: NSRect) -> bool {
+        p.x >= r.origin.x
+            && p.x < r.origin.x + r.size.width
+            && p.y >= r.origin.y
+            && p.y < r.origin.y + r.size.height
+    }
+
+    /// Places the launcher on the display containing the mouse cursor,
+    /// centered horizontally and a fifth of the way down its visible frame.
+    pub fn place_at_cursor(n: Native, size: (f32, f32)) {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let Some(window) = window_of(n) else { return };
+        let mouse = NSEvent::mouseLocation();
+        let screens = NSScreen::screens(mtm);
+        let target = screens
+            .iter()
+            .find(|s| point_in_rect(mouse, s.frame()))
+            .or_else(|| NSScreen::mainScreen(mtm))
+            .or_else(|| screens.firstObject());
+        let Some(screen) = target else { return };
+        let rect = launcher_rect(screen.visibleFrame(), size);
+        window.setFrame_display(rect, false);
+    }
+
+    pub fn set_cloaked(n: Native, cloaked: bool) {
+        if let Some(window) = window_of(n) {
+            window.setAlphaValue(if cloaked { 0.0 } else { 1.0 });
+            if !cloaked {
+                window.invalidateShadow();
+            }
+        }
+    }
+
+    pub fn show(n: Native) {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let Some(window) = window_of(n) else { return };
+        let app = NSApplication::sharedApplication(mtm);
+        if app.isHidden() {
+            app.unhideWithoutActivation();
+        }
+        window.orderFrontRegardless();
+    }
+
+    /// Hides only the launcher window. If RedSnap is active and no other
+    /// RedSnap window (such as Settings) is visible, hides the app so macOS
+    /// returns focus immediately to the previously frontmost app.
+    pub fn hide(n: Native) {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let Some(window) = window_of(n) else { return };
+        window.orderOut(None);
+        let app = NSApplication::sharedApplication(mtm);
+        let self_num = window.windowNumber();
+        let other_visible = app
+            .windows()
+            .iter()
+            .any(|w| w.windowNumber() != self_num && w.isVisible() && w.canBecomeKeyWindow());
+        if !other_visible && app.isActive() {
+            app.hide(None);
+        }
+    }
+
+    /// Synchronously runs gpui's `CALayerDelegate::displayLayer:` on
+    /// `GPUIView`, drawing and presenting the pending frame immediately
+    /// instead of waiting for the next vsync tick.
+    pub fn paint_now(n: Native) {
+        let Some(ns_view) = view(n) else { return };
+        let Some(layer) = ns_view.layer() else { return };
+        unsafe {
+            let view_obj: *const AnyObject = (ns_view as *const NSView).cast();
+            let layer_obj: *const AnyObject = Retained::as_ptr(&layer).cast();
+            let _: () = msg_send![view_obj, displayLayer: layer_obj];
+        }
+    }
+
+    pub fn take_focus(n: Native) {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let Some(ns_view) = view(n) else { return };
+        let Some(window) = ns_view.window() else {
+            return;
+        };
+        let app = NSApplication::sharedApplication(mtm);
+        if app.isHidden() {
+            app.unhideWithoutActivation();
+        }
+        #[allow(deprecated)]
+        app.activateIgnoringOtherApps(true);
+        window.makeKeyAndOrderFront(None);
+        window.makeFirstResponder(Some(ns_view));
+    }
+
+    pub const CAN_PAINT_NOW: bool = true;
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn positions_launcher_centered_in_visible_frame() {
+            // 1470×956 MacBook with 33 pt menu bar and 56 pt Dock at bottom.
+            let vis = NSRect::new(NSPoint::new(0.0, 56.0), NSSize::new(1470.0, 867.0));
+            let r = launcher_rect(vis, (760.0, 474.0));
+            assert_eq!(r.origin.x, 355.0);
+            assert_eq!(r.origin.y, 370.0);
+            assert_eq!((r.size.width, r.size.height), (760.0, 474.0));
+
+            // Secondary monitor to the left (negative X) with top menu bar.
+            let left_mon = NSRect::new(NSPoint::new(-1920.0, 0.0), NSSize::new(1920.0, 1055.0));
+            let r = launcher_rect(left_mon, (760.0, 474.0));
+            assert_eq!(r.origin.x, -1340.0);
+            // top_margin = (1055 - 474) / 5 = 116.2; y = 1055 - 116.2 - 474 = 464.8 -> 465
+            assert_eq!(r.origin.y, 465.0);
+
+            // Smaller display than the window: stays pinned to visible origin.
+            let tiny = NSRect::new(NSPoint::new(10.0, 20.0), NSSize::new(640.0, 400.0));
+            let r = launcher_rect(tiny, (760.0, 474.0));
+            assert_eq!(r.origin.x, 10.0);
+            assert_eq!(r.origin.y, 20.0);
+        }
+
+        #[test]
+        fn point_in_rect_checks_half_open_bounds() {
+            let r = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1470.0, 956.0));
+            assert!(point_in_rect(NSPoint::new(0.0, 0.0), r));
+            assert!(point_in_rect(NSPoint::new(735.0, 478.0), r));
+            assert!(!point_in_rect(NSPoint::new(1470.0, 478.0), r));
+            assert!(!point_in_rect(NSPoint::new(-1.0, 100.0), r));
+        }
+    }
 }

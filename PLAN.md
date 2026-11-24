@@ -577,7 +577,7 @@ keystroke. The risk is gpui's frame cost, which M0 measures against them.
 ### 5.12 Tray, start at login, single instance, session
 
 - Tray:
-  - Windows and macOS use `tray-icon` (template image on macOS).
+  - Windows uses `tray-icon`; macOS uses a native `NSStatusItem` + `NSMenu` with a 2× Retina template image.
   - Linux uses `ksni` (StatusNotifierItem over D-Bus), which needs no GTK main
     loop next to gpui's.
   - Re-add the Windows tray icon on the `TaskbarCreated` message (Explorer
@@ -716,8 +716,16 @@ off-screen windows; gpui's Windows `activate()` replays creation bounds and
 injects a fake Alt keypress (the app takes the foreground itself); the matte
 glass's screen capture cost 9–13 ms on Windows (the matte glass was removed
 later). Chinese IME input worked.
-Still open: a macOS latency measurement (the CI bench stalled after a few
-shows).
+**macOS result (2026-11-25): passed.** Measured in release build on Apple Silicon (macOS 27.2, 20 warm show/hide cycles, `paint_now` via `CALayerDelegate::displayLayer:`, native blur enabled):
+
+| | p50 | p95 |
+|---|---|---|
+| show → frame presented (`paint_now`) | 0.92 ms | 1.30 ms |
+| show results | 0.18 ms | 0.26 ms |
+| gpui layout + paint (`frame_draw`) | 0.26 ms | 0.38 ms |
+| gpui layout + paint + present | 0.38 ms | 0.58 ms |
+
+App scan (191 `.app` bundles): 50 ms. Cold first show: 11.9 ms.
 
 **M0 latency spike, as planned:**
 

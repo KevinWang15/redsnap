@@ -356,7 +356,12 @@ fn search(v: &mut SettingsView, cx: &mut Cx) -> AnyElement {
         (
             "p-open",
             "Open URLs and browse folders",
-            "Type github.com, or a path like C:\\Users\\ to list it".into(),
+            if cfg!(windows) {
+                "Type github.com, or a path like C:\\Users\\ to list it"
+            } else {
+                "Type github.com, or a path like ~/Documents/ to list it"
+            }
+            .into(),
             p.open,
             |p| &mut p.open,
         ),
@@ -765,10 +770,16 @@ fn apps(v: &mut SettingsView, cx: &mut Cx) -> AnyElement {
 fn snippets(v: &mut SettingsView, cx: &mut Cx) -> AnyElement {
     let c = v.snap.as_ref().unwrap().config.clone();
     let s = &c.snippets;
-    let expand_hint = if cfg!(windows) {
-        "Typing a trigger replaces it with its snippet."
-    } else {
-        "Not available on this system yet; snippets still work from RedSnap."
+    let expand_hint = match redsnap_platform::snippets::availability() {
+        redsnap_platform::snippets::Availability::Ready => {
+            "Typing a trigger replaces it with its snippet."
+        }
+        redsnap_platform::snippets::Availability::NeedsPermission => {
+            "Grant Accessibility permission in System Settings → Privacy & Security → Accessibility so triggers expand as you type and Enter inserts snippets."
+        }
+        redsnap_platform::snippets::Availability::Unavailable => {
+            "Not available on this system yet; snippets still work from RedSnap."
+        }
     };
     let help = "A trigger that starts with a letter expands only at the start of a word; triggers starting with a symbol, like ;sig, \
                 expand anywhere. Placeholders: {{cursor}} where the caret ends up, {{date}}, {{time}}, {{datetime}}, \
@@ -893,7 +904,11 @@ fn snippets(v: &mut SettingsView, cx: &mut Cx) -> AnyElement {
         );
         let text = v.area(
             &format!("sn:{id}:text"),
-            "The text. Ctrl+Enter to save.",
+            if cfg!(target_os = "macos") {
+                "The text. ⌘Enter to save."
+            } else {
+                "The text. Ctrl+Enter to save."
+            },
             cx,
             move |c| {
                 c.snippets
@@ -994,36 +1009,41 @@ fn snippets(v: &mut SettingsView, cx: &mut Cx) -> AnyElement {
 fn clipboard(v: &mut SettingsView, cx: &mut Cx) -> AnyElement {
     let c = v.snap.as_ref().unwrap().config.clone();
     let cb = &c.clipboard;
+    let mut history_rows = vec![
+        toggle_row(
+            v,
+            "cb-enabled",
+            "Keep clipboard history",
+            Some(format!("Off: nothing is recorded{RESTART}")),
+            cb.enabled,
+            cx,
+            |c, on| c.clipboard.enabled = on,
+        ),
+        row(
+            "Shortcut",
+            None,
+            v.recorder(Shortcut::Clipboard, &cb.hotkey, cx),
+        ),
+        toggle_row(
+            v,
+            "cb-skipped",
+            "Show copies that weren't kept",
+            Some("Dimmed, with the reason (marked private, too large, an excluded app…).".into()),
+            cb.show_skipped,
+            cx,
+            |c, on| c.clipboard.show_skipped = on,
+        ),
+    ];
+    if cfg!(target_os = "macos") && !redsnap_platform::clipboard::can_paste() {
+        history_rows.push(note(
+            "Enter copies the selected item. Grant Accessibility permission in System Settings → Privacy & Security → Accessibility to paste directly into the previous app.",
+            cx,
+        ));
+    }
     let history = group(
         "Clipboard history",
         Some("Every copy is either kept or listed as not kept, with the reason."),
-        vec![
-            toggle_row(
-                v,
-                "cb-enabled",
-                "Keep clipboard history",
-                Some(format!("Off: nothing is recorded{RESTART}")),
-                cb.enabled,
-                cx,
-                |c, on| c.clipboard.enabled = on,
-            ),
-            row(
-                "Shortcut",
-                None,
-                v.recorder(Shortcut::Clipboard, &cb.hotkey, cx),
-            ),
-            toggle_row(
-                v,
-                "cb-skipped",
-                "Show copies that weren't kept",
-                Some(
-                    "Dimmed, with the reason (marked private, too large, an excluded app…).".into(),
-                ),
-                cb.show_skipped,
-                cx,
-                |c, on| c.clipboard.show_skipped = on,
-            ),
-        ],
+        history_rows,
     );
     let days = number(
         v,

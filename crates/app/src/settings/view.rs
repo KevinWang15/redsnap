@@ -114,6 +114,7 @@ pub struct SettingsView {
     pub inputs: HashMap<String, (Entity<InputState>, Subscription)>,
     pub recording: Option<Shortcut>,
     pub recorder_error: Option<(Shortcut, String)>,
+    pub focus: FocusHandle,
     pub recorder_focus: FocusHandle,
     /// A button waiting for its second click ("Click again to …").
     pub confirming: Option<&'static str>,
@@ -123,7 +124,9 @@ pub struct SettingsView {
 
 impl SettingsView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus = cx.focus_handle();
         let recorder_focus = cx.focus_handle();
+        window.focus(&focus, cx);
         let subs = vec![
             cx.on_blur(&recorder_focus, window, |this, _, cx| {
                 this.stop_recording(cx)
@@ -148,6 +151,7 @@ impl SettingsView {
             inputs: HashMap::new(),
             recording: None,
             recorder_error: None,
+            focus,
             recorder_focus,
             confirming: None,
             window: window.window_handle(),
@@ -839,6 +843,23 @@ impl Render for SettingsView {
                 .into_any_element()
         };
         div()
+            .track_focus(&self.focus)
+            .when(cfg!(target_os = "macos"), |d| {
+                d.on_key_down(cx.listener(|this, e: &KeyDownEvent, window, _| {
+                    if this.recording.is_some() {
+                        return;
+                    }
+                    let k = &e.keystroke;
+                    if k.modifiers.platform
+                        && !k.modifiers.control
+                        && !k.modifiers.alt
+                        && !k.modifiers.shift
+                        && k.key == "w"
+                    {
+                        window.remove_window();
+                    }
+                }))
+            })
             .size_full()
             .relative()
             .flex()

@@ -6,6 +6,8 @@
 use redsnap_core::clipboard::{Capture, Content};
 
 pub mod convert;
+#[cfg(target_os = "macos")]
+pub(crate) mod macos;
 #[cfg(windows)]
 pub(crate) mod windows;
 
@@ -45,17 +47,23 @@ pub fn now_ms() -> i64 {
 pub struct Watcher {
     #[cfg(windows)]
     inner: windows::Watcher,
+    #[cfg(target_os = "macos")]
+    inner: macos::Watcher,
 }
 
 impl Watcher {
     /// Starts watching; `on_clip` is called on a background thread. `None`
-    /// where capture isn't implemented yet (macOS, Linux: later in M5).
+    /// where capture isn't implemented yet (Linux: later in M5).
     pub fn start(limits: ReadLimits, on_clip: OnClip) -> anyhow::Result<Option<Watcher>> {
         #[cfg(windows)]
         return Ok(Some(Watcher {
             inner: windows::Watcher::start(limits, on_clip)?,
         }));
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
+        return Ok(Some(Watcher {
+            inner: macos::Watcher::start(limits, on_clip)?,
+        }));
+        #[cfg(not(any(windows, target_os = "macos")))]
         {
             let _ = (limits, on_clip);
             Ok(None)
@@ -65,9 +73,9 @@ impl Watcher {
     /// Puts `content` on the clipboard, marked as RedSnap's own write for
     /// entry `id`, so the watcher doesn't record it as a new copy.
     pub fn write(&self, content: &Content, id: &str) -> anyhow::Result<()> {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         return self.inner.write(content, id);
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "macos")))]
         {
             let _ = (content, id);
             anyhow::bail!("writing the clipboard isn't implemented on this OS yet")
@@ -75,15 +83,29 @@ impl Watcher {
     }
 }
 
-/// The window in front before RedSnap showed itself, to paste into.
+/// The window (or app PID on macOS) in front before RedSnap showed itself, to
+/// paste into.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Target(pub usize);
+
+/// Whether RedSnap can paste directly into the previous app (Ctrl+V / Cmd+V).
+/// False on macOS until Accessibility permission is granted, and on Wayland.
+pub fn can_paste() -> bool {
+    #[cfg(windows)]
+    return true;
+    #[cfg(target_os = "macos")]
+    return macos::can_paste();
+    #[cfg(not(any(windows, target_os = "macos")))]
+    false
+}
 
 /// The current foreground window (call before RedSnap takes the foreground).
 pub fn foreground() -> Option<Target> {
     #[cfg(windows)]
     return windows::foreground();
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    return macos::foreground();
+    #[cfg(not(any(windows, target_os = "macos")))]
     None
 }
 
@@ -93,7 +115,9 @@ pub fn foreground() -> Option<Target> {
 pub fn paste_into(target: Target) -> anyhow::Result<()> {
     #[cfg(windows)]
     return windows::paste_into(target);
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    return macos::paste_into(target);
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = target;
         anyhow::bail!("pasting isn't implemented on this OS yet")

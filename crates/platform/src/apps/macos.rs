@@ -2,6 +2,7 @@
 //! level of subfolders, like `/Applications/Utilities`), named by the
 //! Finder's localized display name, identified by their bundle id.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -32,7 +33,35 @@ pub fn scan(extra: &[PathBuf]) -> Result<Vec<AppEntry>> {
         let before = bundles.len();
         collect(&root, 0, &mut bundles, before);
     }
-    Ok(bundles.iter().filter_map(|b| entry(b)).collect())
+    // Finder lives directly in CoreServices rather than CoreServices/Applications.
+    let finder = PathBuf::from("/System/Library/CoreServices/Finder.app");
+    if finder.is_dir() && !bundles.contains(&finder) {
+        bundles.push(finder);
+    }
+    let mut entries: Vec<AppEntry> = bundles.iter().filter_map(|b| entry(b)).collect();
+    disambiguate_keys(&mut entries);
+    Ok(entries)
+}
+
+/// Keeps side-by-side versions of an app that share a `CFBundleIdentifier`
+/// (e.g. Adobe Illustrator 2026 and 2027) from colliding in the catalog while
+/// leaving unique bundle ids unchanged.
+fn disambiguate_keys(entries: &mut [AppEntry]) {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for e in entries.iter() {
+        *counts.entry(e.key.clone()).or_default() += 1;
+    }
+    for e in entries.iter_mut() {
+        if counts.get(&e.key).copied().unwrap_or(0) > 1 {
+            let path = e
+                .location
+                .as_deref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| e.subtitle.clone())
+                .to_lowercase();
+            e.key = format!("{}::{path}", e.key);
+        }
+    }
 }
 
 fn collect(dir: &Path, depth: usize, out: &mut Vec<PathBuf>, start: usize) {
@@ -124,13 +153,94 @@ fn entry(bundle: &Path) -> Option<AppEntry> {
     })
 }
 
-/// The bundle's `.icns` icon at the size nearest above `px`, as BGRA. Apps
-/// that ship their icon only in an asset catalog get the letter tile until
-/// icons come from NSWorkspace.
+/// The bundle's icon at `px` × `px`, as straight-alpha BGRA.
+/// On macOS, uses `NSWorkspace.iconForFile:` so apps whose icon lives only in
+/// an `Assets.car` asset catalog (Safari, System Settings, modern macOS apps)
+/// get their real icon. Falls back to reading `.icns` directly.
 pub fn icon(target: &LaunchTarget, px: u32) -> Option<(usize, usize, Vec<u8>)> {
     let LaunchTarget::Path(bundle) = target else {
         return None;
     };
+    #[cfg(target_os = "macos")]
+    if let Some(img) = workspace_icon(bundle, px) {
+        return Some(img);
+    }
+    icns_icon(bundle, px)
+}
+
+#[cfg(target_os = "macos")]
+fn workspace_icon(bundle: &Path, px: u32) -> Option<(usize, usize, Vec<u8>)> {
+    use objc2::rc::autoreleasepool;
+    use objc2_app_kit::NSWorkspace;
+    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+    use objc2_core_graphics::{
+        CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo,
+        CGImageByteOrderInfo, CGInterpolationQuality,
+    };
+    use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+
+    if px == 0 || !bundle.exists() {
+        return None;
+    }
+    autoreleasepool(|_| {
+        let ns_path = NSString::from_str(&bundle.to_string_lossy());
+        let ns_image = NSWorkspace::sharedWorkspace().iconForFile(&ns_path);
+        let mut proposed = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(px as f64, px as f64));
+        let cg_image =
+            unsafe { ns_image.CGImageForProposedRect_context_hints(&mut proposed, None, None) }?;
+        let (w, h) = (px as usize, px as usize);
+        let mut buf = vec![0u8; w * h * 4];
+        let space = CGColorSpace::new_device_rgb()?;
+        // Little-endian premultiplied ARGB in memory is [B, G, R, A].
+        let bitmap_info =
+            CGImageByteOrderInfo::Order32Little.0 | CGImageAlphaInfo::PremultipliedFirst.0;
+        let ctx = unsafe {
+            CGBitmapContextCreate(
+                buf.as_mut_ptr().cast(),
+                w,
+                h,
+                8,
+                w * 4,
+                Some(&space),
+                bitmap_info,
+            )
+        }?;
+        CGContext::set_interpolation_quality(Some(&ctx), CGInterpolationQuality::High);
+        let src_w = CGImage::width(Some(&cg_image)) as f64;
+        let src_h = CGImage::height(Some(&cg_image)) as f64;
+        let dest = if src_w > 0.0 && src_h > 0.0 {
+            let scale = (px as f64 / src_w).min(px as f64 / src_h);
+            let dw = src_w * scale;
+            let dh = src_h * scale;
+            CGRect::new(
+                CGPoint::new((px as f64 - dw) / 2.0, (px as f64 - dh) / 2.0),
+                CGSize::new(dw, dh),
+            )
+        } else {
+            CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(px as f64, px as f64))
+        };
+        CGContext::draw_image(Some(&ctx), dest, Some(&cg_image));
+        drop(ctx);
+
+        // Premultiplied BGRA → straight-alpha BGRA; reject blank images.
+        let mut any = false;
+        for p in buf.as_chunks_mut::<4>().0 {
+            let a = p[3] as u32;
+            if a > 0 {
+                any = true;
+                for c in &mut p[..3] {
+                    *c = (*c as u32 * 255 + a / 2)
+                        .checked_div(a)
+                        .unwrap_or(0)
+                        .min(255) as u8;
+                }
+            }
+        }
+        any.then_some((w, h, buf))
+    })
+}
+
+fn icns_icon(bundle: &Path, px: u32) -> Option<(usize, usize, Vec<u8>)> {
     let file = bundle_info(bundle)
         .icon_file
         .unwrap_or_else(|| "AppIcon".into());
@@ -156,4 +266,53 @@ pub fn icon(target: &LaunchTarget, px: u32) -> Option<(usize, usize, Vec<u8>)> {
         p.swap(0, 2);
     }
     Some((w, h, data))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duplicate_bundle_ids_are_disambiguated_by_path() {
+        let mut entries = vec![
+            AppEntry {
+                key: "com.adobe.illustrator".into(),
+                name: "Adobe Illustrator 2026".into(),
+                aliases: vec![],
+                subtitle: "/Applications/Adobe Illustrator 2026/Adobe Illustrator.app".into(),
+                launch: LaunchTarget::Path(
+                    "/Applications/Adobe Illustrator 2026/Adobe Illustrator.app".into(),
+                ),
+                location: Some("/Applications/Adobe Illustrator 2026/Adobe Illustrator.app".into()),
+            },
+            AppEntry {
+                key: "com.adobe.illustrator".into(),
+                name: "Adobe Illustrator 2027".into(),
+                aliases: vec![],
+                subtitle: "/Applications/Adobe Illustrator 2027/Adobe Illustrator.app".into(),
+                launch: LaunchTarget::Path(
+                    "/Applications/Adobe Illustrator 2027/Adobe Illustrator.app".into(),
+                ),
+                location: Some("/Applications/Adobe Illustrator 2027/Adobe Illustrator.app".into()),
+            },
+            AppEntry {
+                key: "com.apple.safari".into(),
+                name: "Safari".into(),
+                aliases: vec![],
+                subtitle: "/Applications/Safari.app".into(),
+                launch: LaunchTarget::Path("/Applications/Safari.app".into()),
+                location: Some("/Applications/Safari.app".into()),
+            },
+        ];
+        disambiguate_keys(&mut entries);
+        assert_eq!(
+            entries[0].key,
+            "com.adobe.illustrator::/applications/adobe illustrator 2026/adobe illustrator.app"
+        );
+        assert_eq!(
+            entries[1].key,
+            "com.adobe.illustrator::/applications/adobe illustrator 2027/adobe illustrator.app"
+        );
+        assert_eq!(entries[2].key, "com.apple.safari");
+    }
 }
