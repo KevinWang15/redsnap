@@ -14,8 +14,8 @@ codegen-units = 1
 
 [workspace.dependencies]
 # The gpui fork (PLAN.md §6.1); RedSnap's changes to gpui are commits there.
-gpui = { git = "https://github.com/KevinWang15/gpui", rev = "978bac0ffc7cdde7d773b1c23eb9becba2a544e7" }
-gpui_platform = { git = "https://github.com/KevinWang15/gpui", rev = "978bac0ffc7cdde7d773b1c23eb9becba2a544e7", features = ["font-kit", "x11", "wayland"] }
+gpui = { git = "https://github.com/KevinWang15/gpui", rev = "f6279d5a4597ea1b17de3950fc1d88d18888c46e" }
+gpui_platform = { git = "https://github.com/KevinWang15/gpui", rev = "f6279d5a4597ea1b17de3950fc1d88d18888c46e", features = ["font-kit", "x11", "wayland"] }
 redsnap-core = { path = "crates/core" }
 redsnap-platform = { path = "crates/platform" }
 anyhow = "1"

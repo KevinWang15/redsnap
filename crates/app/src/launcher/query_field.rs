@@ -777,7 +777,7 @@ impl Element for TextElement {
             ElementInputHandler::new(bounds, self.field.clone()),
             cx,
         );
-        window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
+        window.with_content_mask(Some(gpui::ContentMask::new(bounds)), |window| {
             if focus.is_focused(window)
                 && let Some(selection) = prepaint.selection.take()
             {

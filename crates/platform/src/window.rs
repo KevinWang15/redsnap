@@ -45,13 +45,14 @@ mod windows {
         DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
     };
     use windows_sys::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, MonitorFromWindow,
+        GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
+        MonitorFromWindow,
     };
-    use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetCursorPos, HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER,
-        SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, USER_DEFAULT_SCREEN_DPI,
-        WM_PAINT,
+        GetCursorPos, GetWindowRect, HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE,
+        SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow,
+        USER_DEFAULT_SCREEN_DPI, WM_PAINT,
     };
 
     fn hwnd(n: Native) -> HWND {
@@ -99,8 +100,12 @@ mod windows {
 
     fn launcher_rect(work: RECT, size: (f32, f32), dpi: u32) -> RECT {
         let scale = dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
-        let width = (size.0 * scale).round() as i32;
-        let height = (size.1 * scale).round() as i32;
+        let width = ((size.0 * scale).round() as i32)
+            .min(work.right - work.left)
+            .max(1);
+        let height = ((size.1 * scale).round() as i32)
+            .min(work.bottom - work.top)
+            .max(1);
         let left = work.left + (work.right - work.left - width) / 2;
         let top = work.top + (work.bottom - work.top - height) / 5;
         RECT {
@@ -109,6 +114,10 @@ mod windows {
             right: left + width,
             bottom: top + height,
         }
+    }
+
+    fn rects_equal(a: RECT, b: RECT) -> bool {
+        a.left == b.left && a.top == b.top && a.right == b.right && a.bottom == b.bottom
     }
 
     #[test]
@@ -128,48 +137,105 @@ mod windows {
             assert_eq!((r.left, r.top), (left, top));
             assert_eq!((r.right - r.left, r.bottom - r.top), (width, height));
         }
+
+        // Clamps to small work areas without overflowing.
+        let small = RECT {
+            left: 0,
+            top: 0,
+            right: 800,
+            bottom: 600,
+        };
+        let clamped = launcher_rect(small, (760., 474.), 144);
+        assert_eq!((clamped.right - clamped.left, clamped.bottom - clamped.top), (800, 600));
+        assert!(rects_equal(clamped, small));
     }
 
-    /// Apply the logical size of the borderless popup on every show, including
-    /// when Windows has changed the display scale while the window was hidden.
+    /// Queries the destination monitor's effective DPI directly so hidden
+    /// windows never size against a stale cached HWND DPI.
+    unsafe fn monitor_dpi(mon: HMONITOR, h: HWND) -> u32 {
+        let mut dpi_x: u32 = 0;
+        let mut dpi_y: u32 = 0;
+        if unsafe { GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) } == 0
+            && dpi_x > 0
+        {
+            return dpi_x;
+        }
+        unsafe { GetDpiForWindow(h) }
+    }
+
+    unsafe fn target_rect_at_cursor(h: HWND, size: (f32, f32)) -> Option<(HMONITOR, RECT)> {
+        let mut p = POINT::default();
+        if unsafe { GetCursorPos(&mut p) } == 0 {
+            return None;
+        }
+        let mon = unsafe { MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST) };
+        let mut info = MONITORINFO {
+            cbSize: size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if unsafe { GetMonitorInfoW(mon, &mut info) } == 0 {
+            return None;
+        }
+        let dpi = unsafe { monitor_dpi(mon, h) };
+        if dpi == 0 {
+            return None;
+        }
+        Some((mon, launcher_rect(info.rcWork, size, dpi)))
+    }
+
+    /// Apply the logical size of the borderless popup on every show, using the
+    /// destination monitor's effective DPI even when Windows changed display
+    /// scale or topology while the window was hidden.
     pub fn place_at_cursor(n: Native, size: (f32, f32)) {
         let h = hwnd(n);
         unsafe {
-            let mut p = POINT::default();
-            if GetCursorPos(&mut p) == 0 {
+            let Some((mon, rect)) = target_rect_at_cursor(h, size) else {
                 return;
-            }
-            let mon = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
-            let mut info = MONITORINFO {
-                cbSize: size_of::<MONITORINFO>() as u32,
-                ..Default::default()
             };
-            if GetMonitorInfoW(mon, &mut info) == 0 {
-                return;
-            }
-            let work = info.rcWork;
+            let width = rect.right - rect.left;
+            let height = rect.bottom - rect.top;
             if MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) != mon {
-                // Move entirely onto the destination while cloaked. GPUI handles
-                // WM_DPICHANGED synchronously and may apply Windows' suggested
-                // rectangle during this move. Read the new DPI after it returns.
+                // Move onto the destination monitor at the already-scaled target
+                // size while cloaked so any synchronous WM_DPICHANGED completes
+                // before the final placement call below.
                 if SetWindowPos(
                     h,
                     std::ptr::null_mut(),
-                    work.left,
-                    work.top,
-                    (size.0 as i32).min(work.right - work.left),
-                    (size.1 as i32).min(work.bottom - work.top),
+                    rect.left,
+                    rect.top,
+                    width,
+                    height,
                     SWP_NOACTIVATE | SWP_NOZORDER,
                 ) == 0
                 {
                     return;
                 }
             }
-            let dpi = GetDpiForWindow(h);
-            if dpi == 0 {
+            SetWindowPos(
+                h,
+                HWND_TOPMOST,
+                rect.left,
+                rect.top,
+                width,
+                height,
+                SWP_NOACTIVATE,
+            );
+        }
+    }
+
+    /// Re-applies the scaled placement if showing a previously hidden window
+    /// triggered a deferred `WM_DPICHANGED` whose suggested rect shifted or
+    /// resized the window away from the target monitor rectangle.
+    pub fn ensure_placed_at_cursor(n: Native, size: (f32, f32)) {
+        let h = hwnd(n);
+        unsafe {
+            let Some((_, rect)) = target_rect_at_cursor(h, size) else {
+                return;
+            };
+            let mut current = RECT::default();
+            if GetWindowRect(h, &mut current) != 0 && rects_equal(current, rect) {
                 return;
             }
-            let rect = launcher_rect(work, size, dpi);
             SetWindowPos(
                 h,
                 HWND_TOPMOST,
@@ -271,6 +337,8 @@ mod linux {
     }
 
     pub fn set_cloaked(_: Native, _: bool) {}
+
+    pub fn ensure_placed_at_cursor(_: Native, _: (f32, f32)) {}
 
     pub fn show(n: Native) {
         if let Some((c, _)) = conn() {
@@ -542,6 +610,8 @@ mod macos {
         let rect = launcher_rect(screen.visibleFrame(), size);
         window.setFrame_display(rect, false);
     }
+
+    pub fn ensure_placed_at_cursor(_: Native, _: (f32, f32)) {}
 
     pub fn set_cloaked(n: Native, cloaked: bool) {
         if let Some(window) = window_of(n) {

@@ -693,9 +693,11 @@ pub async fn show(
     let Ok((native, opts)) = prepared else { return };
     let Some(n) = native else { return };
     log::debug!("show");
+    let target_size = (WIDTH, height(opts.rows));
     os::set_cloaked(n, true);
-    os::place_at_cursor(n, (WIDTH, height(opts.rows)));
+    os::place_at_cursor(n, target_size);
     os::show(n);
+    os::ensure_placed_at_cursor(n, target_size);
     os::paint_now(n);
     os::set_cloaked(n, false);
     // The process that got the hotkey may take the foreground directly; gpui's
